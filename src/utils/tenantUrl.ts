@@ -1,14 +1,40 @@
 /**
- * Construye la URL completa del tenant (slug + dominio central).
- * Producción: https://slug.app.tukifac.cloud
- * Desarrollo: http://slug.localhost:5173 (tenant frontend)
+ * URLs de tenants: {slug}.{root_domain} (ej. doricontdemo.tukifac.com).
+ * El panel central (app.tukifac.com) no forma parte del host del tenant.
  */
+
+function isLocalHost(): boolean {
+  if (typeof window === 'undefined') return false
+  const h = window.location.hostname
+  return h === 'localhost' || h.startsWith('127.')
+}
+
+/** Dominio raíz para tenants (VITE_ROOT_DOMAIN). Dev: localhost:5173 del tenant frontend. */
+export function getRootDomain(): string {
+  const fromEnv = import.meta.env.VITE_ROOT_DOMAIN as string | undefined
+  if (fromEnv) {
+    return fromEnv.replace(/^https?:\/\//, '').split('/')[0]
+  }
+  if (isLocalHost()) return 'localhost:5173'
+  return 'tukifac.com'
+}
+
+/** Host del tenant sin protocolo (ej. miempresa.tukifac.com). */
+export function getTenantHost(slug: string): string {
+  const root = getRootDomain()
+  const clean = slug.trim().toLowerCase()
+  const label = clean || 'subdominio'
+  return `${label}.${root}`
+}
+
 export function getTenantUrl(slug: string): string {
-  const domain = import.meta.env.VITE_APP_DOMAIN as string | undefined
-  const host = typeof window !== 'undefined' ? window.location.hostname : ''
-  const isLocal = host === 'localhost' || host.startsWith('127.')
-  const baseDomain = domain || (isLocal ? 'localhost:5173' : host || 'app.tukifac.cloud')
-  const protocol = baseDomain.startsWith('localhost') ? 'http' : 'https'
-  const cleanDomain = baseDomain.replace(/^https?:\/\//, '').split('/')[0]
-  return `${protocol}://${slug}.${cleanDomain}`
+  const host = getTenantHost(slug)
+  const protocol = host.includes('localhost') ? 'http' : 'https'
+  return `${protocol}://${host}`
+}
+
+/** Prefiere tenant_url de la API; si no, construye con root domain. */
+export function resolveTenantUrl(tenant: { slug: string; tenant_url?: string }): string {
+  if (tenant.tenant_url) return tenant.tenant_url
+  return getTenantUrl(tenant.slug)
 }

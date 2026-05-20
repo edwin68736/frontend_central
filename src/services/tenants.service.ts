@@ -4,6 +4,9 @@ export interface Tenant {
   id: number
   name: string
   slug: string
+  root_domain?: string
+  tenant_host?: string
+  tenant_url?: string
   email: string
   phone: string
   ruc: string

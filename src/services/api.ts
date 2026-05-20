@@ -1,12 +1,14 @@
 import axios from 'axios'
 
 // URL del backend: en build se usa VITE_API_URL. Si no está definida (p. ej. build sin .env.production),
-// en producción derivamos desde el host: app.tukifac.cloud → api.tukifac.cloud
+// en producción derivamos desde el host del panel central si no hay VITE_API_URL
 function getBaseURL(): string {
   const fromEnv = import.meta.env.VITE_API_URL
   if (fromEnv && fromEnv.startsWith('http')) return fromEnv
-  if (typeof window !== 'undefined' && window.location.hostname === 'app.tukifac.cloud') {
-    return 'https://api.tukifac.cloud/api'
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname
+    if (host === 'app.tukifac.com') return 'https://api.tukifac.com/api'
+    if (host === 'app.tukifac.cloud') return 'https://api.tukifac.cloud/api'
   }
   return fromEnv || '/api'
 }

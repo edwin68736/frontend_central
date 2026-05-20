@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { FileCheck, Edit, RefreshCw } from 'lucide-react'
 import { tenantsService, type TenantConectadoSunat } from '@/services/tenants.service'
-import { getTenantUrl } from '@/utils/tenantUrl'
+import { resolveTenantUrl } from '@/utils/tenantUrl'
 import { Card, CardHeader, CardBody } from '@/components/ui/Card'
 import Spinner from '@/components/ui/Spinner'
 
@@ -116,11 +116,11 @@ export default function EmpresasSunatPage() {
                     <td className="px-4 py-3">
                       {t.slug ? (
                         <a
-                          href={getTenantUrl(t.slug)}
+                          href={resolveTenantUrl(t)}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="font-mono text-xs text-blue-600 hover:text-blue-800 hover:underline"
-                          title={getTenantUrl(t.slug)}
+                          title={resolveTenantUrl(t)}
                         >
                           {t.slug}
                         </a>

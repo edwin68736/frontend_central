@@ -18,7 +18,7 @@ import {
   type SunatConfigUpdate,
 } from '@/services/tenants.service'
 import { consultaService } from '@/services/consulta.service'
-import { getTenantUrl } from '@/utils/tenantUrl'
+import { getRootDomain, getTenantHost, resolveTenantUrl } from '@/utils/tenantUrl'
 import { ubigeoService } from '@/services/ubigeo.service'
 import { UbigeoSelects, ubigeoToIds } from '@/components/UbigeoSelects'
 import { Card, CardHeader, CardBody } from '@/components/ui/Card'
@@ -627,11 +627,11 @@ export default function TenantsPage() {
                     </td>
                     <td className="px-4 py-3">
                       <a
-                        href={getTenantUrl(t.slug)}
+                        href={resolveTenantUrl(t)}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="font-mono text-xs text-blue-600 hover:text-blue-800 hover:underline"
-                        title={getTenantUrl(t.slug)}
+                        title={resolveTenantUrl(t)}
                       >
                         {t.slug}
                       </a>
@@ -741,11 +741,13 @@ export default function TenantsPage() {
                   autoComplete="off"
                 />
                 <span className="flex items-center px-3 py-2 text-sm text-slate-500 font-mono bg-slate-50/80 border-l border-slate-200 whitespace-nowrap">
-                  .app.tukifac.cloud
+                  .{getRootDomain()}
                 </span>
               </div>
               <p className="text-xs text-slate-500 mt-1">
-                El tenant accederá a: <span className="font-mono text-slate-600">{createForm.watch('slug') || 'subdominio'}.app.tukifac.cloud</span>
+                Se guardará el slug <span className="font-mono text-slate-700">{createForm.watch('slug') || 'subdominio'}</span>
+                {' '}y el tenant accederá a:{' '}
+                <span className="font-mono text-slate-600">{getTenantHost(createForm.watch('slug') ?? '')}</span>
               </p>
             </FormField>
             <FormField label="Email *" error={createForm.formState.errors.email?.message}>

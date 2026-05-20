@@ -4,7 +4,7 @@ import { toast } from 'sonner'
 import { Card, CardHeader, CardBody } from '@/components/ui/Card'
 import Spinner from '@/components/ui/Spinner'
 import { pseEmpresasService, type PSEEmpresa } from '@/services/pseEmpresas.service'
-import { getTenantUrl } from '@/utils/tenantUrl'
+import { resolveTenantUrl } from '@/utils/tenantUrl'
 
 function formatDate(s: string | null | undefined): string {
   if (!s) return '—'
@@ -145,11 +145,11 @@ export default function EmpresasPsePage() {
                     <td className="px-4 py-3">
                       {it.tenant ? (
                         <a
-                          href={getTenantUrl(it.tenant.slug)}
+                          href={resolveTenantUrl(it.tenant)}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="font-mono text-xs text-blue-600 hover:text-blue-800 hover:underline"
-                          title={getTenantUrl(it.tenant.slug)}
+                          title={resolveTenantUrl(it.tenant)}
                         >
                           {it.tenant.slug}
                         </a>
