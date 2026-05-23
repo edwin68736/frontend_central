@@ -5,7 +5,7 @@ import { z } from 'zod'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { toast } from 'sonner'
 import {
-  Plus, Search, RefreshCw, Edit, Power, Layers, ChevronDown, Shield, SearchCheck,
+  Plus, Search, RefreshCw, Edit, Power, Layers, ChevronDown, Shield, SearchCheck, Trash2, AlertTriangle,
 } from 'lucide-react'
 import {
   tenantsService,
@@ -133,6 +133,10 @@ export default function TenantsPage() {
   // Modals
   const [showCreate, setShowCreate] = useState(false)
   const [editTenant, setEditTenant] = useState<Tenant | null>(null)
+  const [destroyTenant, setDestroyTenant] = useState<Tenant | null>(null)
+  const [destroyOpsKey, setDestroyOpsKey] = useState('')
+  const [destroyConfirmSlug, setDestroyConfirmSlug] = useState('')
+  const [destroying, setDestroying] = useState(false)
   const [moduleTenant, setModuleTenant] = useState<{ tenant: Tenant; modules: TenantModule[] } | null>(null)
   const [loadingModules, setLoadingModules] = useState(false)
   const [migratingId, setMigratingId] = useState<number | null>(null)
@@ -868,6 +872,24 @@ export default function TenantsPage() {
           <FormField label="Dirección" error={editForm.formState.errors.address?.message}>
             <input {...editForm.register('address')} placeholder="Calle, nro, ref." className={inputClass} />
           </FormField>
+          <div className="mt-6 pt-4 border-t border-red-100">
+            <p className="text-xs font-semibold text-red-800 uppercase tracking-wide mb-2">Zona peligrosa</p>
+            <p className="text-xs text-slate-600 mb-3">
+              Elimina la empresa, su base de datos MySQL y archivos en este servidor. No modifica el facturador Lycet/SUNAT.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setDestroyTenant(editTenant)
+                setDestroyOpsKey('')
+                setDestroyConfirmSlug('')
+              }}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-red-300 text-red-800 text-sm font-medium hover:bg-red-50"
+            >
+              <Trash2 size={16} />
+              Eliminar empresa por completo…
+            </button>
+          </div>
           <div className="flex justify-end gap-3 pt-2">
             <button type="button" onClick={() => setEditTenant(null)} className={btnSecondary}>Cancelar</button>
             <button type="submit" disabled={editForm.formState.isSubmitting} className={btnPrimary}>
@@ -875,6 +897,104 @@ export default function TenantsPage() {
             </button>
           </div>
         </form>
+      </Modal>
+
+      {/* ── Modal: Destroy tenant ─────────────────────────── */}
+      <Modal
+        open={!!destroyTenant}
+        onClose={() => !destroying && setDestroyTenant(null)}
+        title="Eliminar empresa por completo"
+        maxWidth="max-w-lg"
+      >
+        {destroyTenant && (
+          <div className="space-y-4">
+            <div className="flex gap-3 p-3 rounded-lg bg-red-50 border border-red-200 text-red-900 text-sm">
+              <AlertTriangle className="shrink-0 mt-0.5" size={20} />
+              <div>
+                <p className="font-semibold">Esta acción no se puede deshacer</p>
+                <ul className="mt-2 list-disc list-inside text-xs space-y-1">
+                  <li>Registro en BD central: <strong>{destroyTenant.name}</strong></li>
+                  <li>Base de datos: <strong>{destroyTenant.db_name}</strong></li>
+                  <li>Archivos en <code>uploads/tenants/{destroyTenant.ruc || '…'}</code></li>
+                  <li>Comprobantes en almacenamiento local del ERP</li>
+                  <li>Suscripciones, pagos y cupos de documentos</li>
+                </ul>
+                <p className="mt-2 text-xs font-medium">El facturador SUNAT/Lycet externo no se modifica.</p>
+              </div>
+            </div>
+            <div>
+              <label className="text-xs text-slate-600">Clave de operaciones</label>
+              <input
+                type="password"
+                className={inputClass}
+                value={destroyOpsKey}
+                onChange={e => setDestroyOpsKey(e.target.value)}
+                autoComplete="off"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-slate-600">
+                Escriba el slug para confirmar: <strong>{destroyTenant.slug}</strong>
+              </label>
+              <input
+                className={inputClass}
+                value={destroyConfirmSlug}
+                onChange={e => setDestroyConfirmSlug(e.target.value)}
+                placeholder={destroyTenant.slug}
+                autoComplete="off"
+              />
+            </div>
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                type="button"
+                disabled={destroying}
+                onClick={() => setDestroyTenant(null)}
+                className={btnSecondary}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={
+                  destroying ||
+                  !destroyOpsKey ||
+                  destroyConfirmSlug.trim().toLowerCase() !== destroyTenant.slug.toLowerCase()
+                }
+                onClick={async () => {
+                  setDestroying(true)
+                  try {
+                    const res = await tenantsService.destroyComplete(destroyTenant.id, {
+                      operations_key: destroyOpsKey,
+                      confirm_slug: destroyConfirmSlug.trim(),
+                    })
+                    const warn =
+                      res.result?.file_errors?.length
+                        ? ` (${res.result.file_errors.length} advertencia(s) en archivos)`
+                        : ''
+                    toast.success((res.message ?? 'Empresa eliminada por completo') + warn)
+                    setDestroyTenant(null)
+                    setDestroyOpsKey('')
+                    setDestroyConfirmSlug('')
+                    setEditTenant(null)
+                    await fetchTenants()
+                  } catch (e: unknown) {
+                    const err = e as { response?: { data?: { error?: string }; message?: string } }
+                    toast.error(
+                      err.response?.data?.error ??
+                        (e instanceof Error ? e.message : undefined) ??
+                        'No se pudo eliminar',
+                    )
+                  } finally {
+                    setDestroying(false)
+                  }
+                }}
+                className="px-4 py-2 bg-red-700 text-white rounded-lg text-sm font-medium disabled:opacity-50"
+              >
+                {destroying ? 'Eliminando…' : 'Eliminar definitivamente'}
+              </button>
+            </div>
+          </div>
+        )}
       </Modal>
 
       {/* ── Modal: Modules ───────────────────────────────── */}

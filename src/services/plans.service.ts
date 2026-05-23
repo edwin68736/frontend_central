@@ -17,6 +17,8 @@ export interface SaasPlan {
   billing_cycle: 'monthly' | 'yearly' | 'lifetime'
   active: boolean
   modules: string[]
+  is_unlimited_documents?: boolean
+  monthly_documents_limit?: number
   created_at: string
 }
 
@@ -26,6 +28,8 @@ export interface CreatePlanInput {
   price: number
   billing_cycle: string
   modules: string[]
+  is_unlimited_documents?: boolean
+  monthly_documents_limit?: number
 }
 
 export const plansService = {

@@ -135,6 +135,27 @@ export const tenantsService = {
     await api.post(`/superadmin/tenants/${id}/migrate`)
   },
 
+  /** Elimina por completo tenant, BD MySQL y archivos locales (no toca Lycet/SUNAT). */
+  async destroyComplete(
+    id: number,
+    body: { operations_key: string; confirm_slug: string },
+  ): Promise<{
+    success: boolean
+    message: string
+    result: {
+      tenant_id: number
+      slug: string
+      db_name: string
+      db_dropped: boolean
+      central_purged: boolean
+      paths_removed: string[]
+      file_errors?: string[]
+    }
+  }> {
+    const { data } = await api.post(`/superadmin/tenants/${id}/destroy-complete`, body)
+    return data
+  },
+
   async migrateAll(): Promise<void> {
     await api.post('/superadmin/tenants/migrate-all')
   },

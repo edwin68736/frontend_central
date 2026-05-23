@@ -19,6 +19,7 @@ export default function PlansPage() {
   const [editing, setEditing] = useState<SaasPlan | null>(null)
   const [form, setForm] = useState<CreatePlanInput>({
     name: '', description: '', price: 0, billing_cycle: 'monthly', modules: [],
+    is_unlimited_documents: false, monthly_documents_limit: 50,
   })
   const [saving, setSaving] = useState(false)
 
@@ -36,7 +37,7 @@ export default function PlansPage() {
 
   const openCreate = () => {
     setEditing(null)
-    setForm({ name: '', description: '', price: 0, billing_cycle: 'monthly', modules: [] })
+    setForm({ name: '', description: '', price: 0, billing_cycle: 'monthly', modules: [], is_unlimited_documents: false, monthly_documents_limit: 50 })
     setShowModal(true)
   }
 
@@ -48,6 +49,8 @@ export default function PlansPage() {
       price: plan.price,
       billing_cycle: plan.billing_cycle,
       modules: plan.modules ?? [],
+      is_unlimited_documents: plan.is_unlimited_documents ?? false,
+      monthly_documents_limit: plan.monthly_documents_limit ?? 0,
     })
     setShowModal(true)
   }
@@ -133,6 +136,10 @@ export default function PlansPage() {
                 <div className="text-xs text-gray-500">{CYCLE_LABELS[plan.billing_cycle] ?? plan.billing_cycle}</div>
               </div>
             </div>
+            <p className="text-xs text-gray-400">
+              Docs electrónicos:{' '}
+              {plan.is_unlimited_documents ? 'Ilimitados' : `${plan.monthly_documents_limit ?? 0} / ciclo`}
+            </p>
 
             <div className="flex flex-wrap gap-1">
               {(plan.modules ?? []).map(k => (
@@ -210,6 +217,29 @@ export default function PlansPage() {
                 <option value="lifetime">Vitalicio</option>
               </select>
             </div>
+          </div>
+
+          <div className="rounded-lg border border-slate-200 p-3 space-y-3">
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={form.is_unlimited_documents ?? false}
+                onChange={e => setForm(f => ({ ...f, is_unlimited_documents: e.target.checked }))}
+              />
+              Documentos electrónicos ilimitados
+            </label>
+            {!form.is_unlimited_documents && (
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Límite por ciclo</label>
+                <input
+                  type="number"
+                  min={0}
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                  value={form.monthly_documents_limit ?? 0}
+                  onChange={e => setForm(f => ({ ...f, monthly_documents_limit: parseInt(e.target.value, 10) || 0 }))}
+                />
+              </div>
+            )}
           </div>
 
           <div>

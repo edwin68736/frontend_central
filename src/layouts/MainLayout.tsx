@@ -17,16 +17,20 @@ import {
   Users,
   MoreVertical,
   User,
+  GitBranch,
 } from 'lucide-react'
 
 const navItems = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/tenants', label: 'Empresas', icon: Building2 },
+  { to: '/fleet-migrations', label: 'Fleet Migrations', icon: GitBranch },
   { to: '/empresas-sunat', label: 'Empresas SUNAT', icon: FileCheck },
   { to: '/empresas-pse', label: 'Empresas PSE', icon: SearchCheck },
   { to: '/plans', label: 'Planes', icon: PackageOpen },
   { to: '/subscriptions', label: 'Suscripciones', icon: CreditCard },
   { to: '/payments', label: 'Pagos', icon: Receipt },
+  { to: '/saas-billing', label: 'Cobros SaaS', icon: CreditCard },
+  { to: '/document-packages', label: 'Paquetes docs', icon: FileCheck },
   { to: '/users', label: 'Usuarios', icon: Users },
   { to: '/settings', label: 'Configuración', icon: Settings },
 ]

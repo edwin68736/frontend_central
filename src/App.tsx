@@ -13,6 +13,9 @@ import PaymentsPage from '@/pages/payments/PaymentsPage'
 import UsersPage from '@/pages/users/UsersPage'
 import ProfilePage from '@/pages/profile/ProfilePage'
 import SettingsPage from '@/pages/SettingsPage'
+import SaasBillingSettingsPage from '@/pages/saas/SaasBillingSettingsPage'
+import DocumentPackagesPage from '@/pages/document-packages/DocumentPackagesPage'
+import FleetMigrationsPage from '@/pages/migrations/FleetMigrationsPage'
 import Spinner from '@/components/ui/Spinner'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -52,6 +55,9 @@ function AppRoutes() {
         <Route path="/users" element={<UsersPage />} />
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/saas-billing" element={<SaasBillingSettingsPage />} />
+        <Route path="/document-packages" element={<DocumentPackagesPage />} />
+        <Route path="/fleet-migrations" element={<FleetMigrationsPage />} />
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
