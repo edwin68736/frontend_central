@@ -35,19 +35,26 @@ const statusLabel = (s: string) =>
 const isProduction = (mode?: string) =>
   (mode ?? '').toLowerCase() === 'production'
 
+function normalizeSunatEnvMode(mode?: string): 'demo' | 'production' {
+  return isProduction(mode) ? 'production' : 'demo'
+}
+
 function SunatEnvCell({ tenant, onUpdated }: { tenant: Tenant; onUpdated: () => void }) {
   const [updating, setUpdating] = useState(false)
-  const mode = tenant.sunat_env_mode ?? 'demo'
-  const prod = isProduction(mode)
+  const [showConfirm, setShowConfirm] = useState(false)
+  const mode = normalizeSunatEnvMode(tenant.sunat_env_mode)
+  const prod = mode === 'production'
 
-  const toggle = async () => {
+  const switchToProduction = async () => {
     setUpdating(true)
+    setShowConfirm(false)
     try {
-      await tenantsService.setSunatEnv(tenant.id, prod ? 'beta' : 'production')
-      toast.success(prod ? 'Cambiado a modo Pruebas' : 'Cambiado a modo Producción')
+      await tenantsService.setSunatEnv(tenant.id, 'production')
+      toast.success('Ambiente cambiado a Producción')
       onUpdated()
-    } catch (e: any) {
-      toast.error(e.response?.data?.error ?? 'Error al cambiar modo')
+    } catch (e: unknown) {
+      const errMsg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error
+      toast.error(errMsg ?? 'Error al cambiar modo')
     } finally {
       setUpdating(false)
     }
@@ -61,20 +68,67 @@ function SunatEnvCell({ tenant, onUpdated }: { tenant: Tenant; onUpdated: () => 
   }
 
   return (
-    <div className="flex items-center gap-2">
-      <span className={`text-xs font-medium ${prod ? 'text-emerald-600' : 'text-amber-600'}`}>
-        {prod ? 'Producción' : 'Pruebas'}
-      </span>
-      <button
-        type="button"
-        onClick={toggle}
-        disabled={updating}
-        className="text-xs px-2 py-0.5 rounded border border-slate-200 hover:bg-slate-50 text-slate-600 disabled:opacity-50"
-        title={prod ? 'Cambiar a Pruebas' : 'Cambiar a Producción'}
+    <>
+      <div className="flex items-center gap-2">
+        <span className={`text-xs font-medium ${prod ? 'text-emerald-600' : 'text-amber-600'}`}>
+          {prod ? 'Producción' : 'Pruebas'}
+        </span>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={prod}
+          aria-label={prod ? 'Ambiente producción (bloqueado)' : 'Pasar a producción'}
+          disabled={updating || prod}
+          onClick={() => setShowConfirm(true)}
+          title={prod ? 'En producción no se puede volver a pruebas' : 'Pasar a producción'}
+          className={`relative inline-flex rounded-full transition-colors flex-shrink-0 ${
+            prod ? 'bg-emerald-600 cursor-not-allowed opacity-90' : 'bg-amber-400 hover:bg-amber-500'
+          } disabled:opacity-60`}
+          style={{ height: '20px', width: '36px' }}
+        >
+          <span
+            className={`absolute top-0.5 bg-white rounded-full shadow transition-transform ${
+              prod ? 'translate-x-[17px]' : 'translate-x-0.5'
+            }`}
+            style={{ width: '16px', height: '16px' }}
+          />
+        </button>
+      </div>
+      <Modal
+        open={showConfirm}
+        onClose={() => !updating && setShowConfirm(false)}
+        title="Pasar a Producción SUNAT"
+        maxWidth="max-w-md"
       >
-        {updating ? '...' : prod ? '→ Pruebas' : '→ Prod'}
-      </button>
-    </div>
+        <div className="space-y-4">
+          <div className="flex gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-900">
+            <AlertTriangle className="shrink-0 mt-0.5" size={18} />
+            <p>
+              Los comprobantes se enviarán al <strong>SUNAT real</strong> de <strong>{tenant.name}</strong>.
+              Este cambio es <strong>irreversible</strong>: no podrá volver a pruebas desde el panel.
+            </p>
+          </div>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setShowConfirm(false)}
+              disabled={updating}
+              className="px-4 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={switchToProduction}
+              disabled={updating}
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium disabled:opacity-50"
+            >
+              {updating ? 'Cambiando...' : 'Sí, pasar a Producción'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+    </>
   )
 }
 
@@ -139,16 +193,19 @@ export default function TenantsPage() {
   const [destroying, setDestroying] = useState(false)
   const [moduleTenant, setModuleTenant] = useState<{ tenant: Tenant; modules: TenantModule[] } | null>(null)
   const [loadingModules, setLoadingModules] = useState(false)
-  const [migratingId, setMigratingId] = useState<number | null>(null)
-  const [migratingAll, setMigratingAll] = useState(false)
   const [sunatTenant, setSunatTenant] = useState<{ tenant: Tenant; config: SunatConfigResponse } | null>(null)
   const [loadingSunat, setLoadingSunat] = useState(false)
   const [savingSunat, setSavingSunat] = useState(false)
   const [sunatForm, setSunatForm] = useState<SunatConfigUpdate & { sunat_sol_pass?: string }>({ sunat_enabled: false })
-  const [pseTokenInput, setPseTokenInput] = useState('')
-  const [syncingPSE, setSyncingPSE] = useState(false)
+  const [psePasswordInput, setPsePasswordInput] = useState('')
+  const [testingConnection, setTestingConnection] = useState(false)
+
+  const sendMode = (cfg?: { send_mode?: string }) => cfg?.send_mode ?? 'sunat_direct'
   const [syncCertBase64, setSyncCertBase64] = useState<string>('')
   const [syncPrivateKeyBase64, setSyncPrivateKeyBase64] = useState<string>('')
+  const [syncPfxBase64, setSyncPfxBase64] = useState<string>('')
+  const [certPasswordInput, setCertPasswordInput] = useState('')
+  const [certInputMode, setCertInputMode] = useState<'pfx' | 'pem'>('pfx')
   const [syncLogoBase64, setSyncLogoBase64] = useState<string>('')
   const [consultandoRuc, setConsultandoRuc] = useState<'create' | 'edit' | null>(null)
 
@@ -332,31 +389,6 @@ export default function TenantsPage() {
     }
   }
 
-  /* ── Migrations ──────────────── */
-  const handleMigrate = async (t: Tenant) => {
-    try {
-      setMigratingId(t.id)
-      await tenantsService.migrate(t.id)
-      toast.success(`Migraciones ejecutadas para ${t.name}`)
-    } catch {
-      toast.error('Error ejecutando migraciones para esta empresa')
-    } finally {
-      setMigratingId(null)
-    }
-  }
-
-  const handleMigrateAll = async () => {
-    try {
-      setMigratingAll(true)
-      await tenantsService.migrateAll()
-      toast.success('Migraciones ejecutadas para todos los tenants')
-    } catch {
-      toast.error('Error ejecutando migraciones masivas')
-    } finally {
-      setMigratingAll(false)
-    }
-  }
-
   /* ── Modules ─────────────────── */
   const openModules = async (t: Tenant) => {
     setLoadingModules(true)
@@ -400,26 +432,43 @@ export default function TenantsPage() {
   const isModuleEnabled = (key: string) =>
     moduleTenant?.modules.some((m) => m.module_key === key && m.enabled) ?? false
 
+  const clearCertUploads = () => {
+    setSyncCertBase64('')
+    setSyncPrivateKeyBase64('')
+    setSyncPfxBase64('')
+    setCertPasswordInput('')
+  }
+
+  const switchCertInputMode = (mode: 'pfx' | 'pem') => {
+    setCertInputMode(mode)
+    clearCertUploads()
+  }
+
   /* ── SUNAT / Facturador ───────────────────────────── */
   const openSunat = async (t: Tenant) => {
     setLoadingSunat(true)
     setSyncCertBase64('')
     setSyncPrivateKeyBase64('')
+    setSyncPfxBase64('')
+    setCertPasswordInput('')
     setSyncLogoBase64('')
-    setPseTokenInput('')
+    setPsePasswordInput('')
+    setCertInputMode('pfx')
+    clearCertUploads()
     try {
       const config = await tenantsService.getSunatConfig(t.id)
       setSunatTenant({ tenant: t, config })
       setSunatForm({
         sunat_enabled: config.sunat_enabled,
         sunat_sol_user: config.sunat_sol_user ?? '',
-        sunat_env_mode: config.sunat_env_mode ?? 'beta',
+        sunat_env_mode: normalizeSunatEnvMode(config.sunat_env_mode),
         tax_rate: config.tax_rate ?? 18,
         igv_regime: config.igv_regime ?? 'standard',
         tax_benefit_zone: config.tax_benefit_zone ?? false,
-        invoicing_mode: config.invoicing_mode ?? 'legacy_backend',
-        pse_provider: config.pse_provider ?? 'validapse',
-        pse_base_url: config.pse_base_url ?? '',
+        send_mode: sendMode(config),
+        pse_provider: config.pse_provider ?? config.fiscal_provider ?? 'validapse',
+        fiscal_provider: config.fiscal_provider ?? config.pse_provider ?? 'validapse',
+        pse_user: config.pse_user ?? '',
       })
     } catch {
       toast.error('Error cargando configuración SUNAT')
@@ -432,47 +481,89 @@ export default function TenantsPage() {
     if (!sunatTenant) return
     setSavingSunat(true)
     try {
-      const mode = (sunatForm.invoicing_mode ?? 'legacy_backend').toString()
+      const mode = sunatForm.send_mode ?? 'sunat_direct'
       if (mode === 'pse') {
-        const base = (sunatForm.pse_base_url ?? '').trim()
         const tokenConfigured = !!sunatTenant.config.pse_token_configured
-        const tokenOk = pseTokenInput.trim() !== '' || tokenConfigured
-        if (!base) {
-          toast.error('Ingrese la URL base del PSE para activar el modo PSE')
+        if (!sunatForm.pse_user?.trim() && !tokenConfigured) {
+          toast.error('Ingrese el usuario PSE (ValidaPSE)')
           setSavingSunat(false)
           return
         }
-        if (!tokenOk) {
-          toast.error('Ingrese el token del PSE para activar el modo PSE')
+        if (!psePasswordInput.trim() && !tokenConfigured) {
+          toast.error('Ingrese la contraseña / token de acceso PSE')
           setSavingSunat(false)
           return
+        }
+      }
+      if (mode === 'sunat_direct') {
+        const solConfigured = !!sunatTenant.config.sol_configured
+        const certConfigured = !!sunatTenant.config.certificate_configured
+        const hasNewPfx = certInputMode === 'pfx' && !!syncPfxBase64
+        const hasNewPem = certInputMode === 'pem' && !!(syncCertBase64 || syncPrivateKeyBase64)
+        const hasNewCert = hasNewPfx || hasNewPem
+        if (!sunatForm.sunat_sol_user?.trim() && !solConfigured && !sunatForm.sunat_sol_pass?.trim()) {
+          toast.error('Ingrese usuario SOL (ej. RUCMODDATOS) y clave SOL')
+          setSavingSunat(false)
+          return
+        }
+        if (!certConfigured && !hasNewCert) {
+          toast.error(
+            certInputMode === 'pfx'
+              ? 'Suba el certificado PFX y la contraseña'
+              : 'Suba el certificado PEM (archivo único combinado o clave privada + certificado)'
+          )
+          setSavingSunat(false)
+          return
+        }
+        if (hasNewPfx && !certPasswordInput.trim()) {
+          toast.error('Ingrese la contraseña del certificado PFX')
+          setSavingSunat(false)
+          return
+        }
+      }
+      if (mode === 'sunat_direct') {
+        const needsCertSync =
+          (certInputMode === 'pfx' && !!syncPfxBase64) ||
+          (certInputMode === 'pem' && !!(syncCertBase64 || syncPrivateKeyBase64))
+        if (needsCertSync || syncLogoBase64) {
+        const syncBody: {
+          certificate_base64?: string
+          private_key_base64?: string
+          pfx_base64?: string
+          certificate_password?: string
+          logo_base64?: string
+          sol_user?: string
+          sol_pass?: string
+        } = {
+          sol_user: sunatForm.sunat_sol_user,
+          sol_pass: sunatForm.sunat_sol_pass,
+        }
+        if (certInputMode === 'pfx' && syncPfxBase64) {
+          syncBody.pfx_base64 = syncPfxBase64
+          syncBody.certificate_password = certPasswordInput.trim()
+        } else if (certInputMode === 'pem') {
+          if (syncCertBase64) syncBody.certificate_base64 = syncCertBase64
+          if (syncPrivateKeyBase64) syncBody.private_key_base64 = syncPrivateKeyBase64
+        }
+        if (syncLogoBase64) syncBody.logo_base64 = syncLogoBase64
+        await tenantsService.syncFacturador(sunatTenant.tenant.id, syncBody)
         }
       }
       await tenantsService.updateSunatConfig(sunatTenant.tenant.id, {
         sunat_enabled: sunatForm.sunat_enabled,
         sunat_sol_user: sunatForm.sunat_sol_user,
-        sunat_sol_pass: sunatForm.sunat_sol_pass,
-        sunat_env_mode: sunatForm.sunat_env_mode,
+        sunat_sol_pass: sunatForm.sunat_sol_pass?.trim() || undefined,
+        sunat_env_mode: normalizeSunatEnvMode(sunatForm.sunat_env_mode),
         tax_rate: sunatForm.tax_rate,
         igv_regime: sunatForm.igv_regime,
         tax_benefit_zone: sunatForm.tax_benefit_zone,
-        invoicing_mode: sunatForm.invoicing_mode,
-        pse_provider: sunatForm.pse_provider,
-        pse_base_url: sunatForm.pse_base_url,
-        pse_token: pseTokenInput.trim() ? pseTokenInput.trim() : undefined,
+        send_mode: mode,
+        fiscal_provider: sunatForm.fiscal_provider ?? sunatForm.pse_provider ?? 'validapse',
+        pse_provider: sunatForm.pse_provider ?? sunatForm.fiscal_provider ?? 'validapse',
+        pse_user: sunatForm.pse_user,
+        pse_password: psePasswordInput.trim() || undefined,
       })
-      if (mode !== 'pse') {
-        const body: { certificate_base64?: string; private_key_base64?: string; logo_base64?: string; sol_user?: string; sol_pass?: string } = {}
-        if (syncCertBase64) body.certificate_base64 = syncCertBase64
-        if (syncPrivateKeyBase64) body.private_key_base64 = syncPrivateKeyBase64
-        if (syncLogoBase64) body.logo_base64 = syncLogoBase64
-        if (sunatForm.sunat_sol_user) body.sol_user = sunatForm.sunat_sol_user
-        if (sunatForm.sunat_sol_pass) body.sol_pass = sunatForm.sunat_sol_pass
-        await tenantsService.syncFacturador(sunatTenant.tenant.id, Object.keys(body).length ? body : undefined)
-        toast.success('Datos guardados y sincronizados con el facturador')
-      } else {
-        toast.success('Datos guardados (modo PSE)')
-      }
+      toast.success('Configuración fiscal guardada y sincronizada')
       fetchTenants()
       openSunat(sunatTenant.tenant)
     } catch (err: unknown) {
@@ -483,19 +574,23 @@ export default function TenantsPage() {
     }
   }
 
-  const handleSyncPSE = async () => {
+  const handleTestFiscalConnection = async () => {
     if (!sunatTenant) return
-    setSyncingPSE(true)
+    setTestingConnection(true)
     try {
-      await tenantsService.syncPSECredentials(sunatTenant.tenant.id)
-      setPseTokenInput('')
-      toast.success('Credenciales PSE sincronizadas')
-      openSunat(sunatTenant.tenant)
+      const result = await tenantsService.testFiscalConnection(sunatTenant.tenant.id)
+      if (result?.success || result?.connection_status === 'connected') {
+        toast.success(result?.message ?? 'Conexión fiscal OK')
+      } else {
+        toast.error(result?.message ?? 'Conexión fiscal fallida')
+      }
+      const config = await tenantsService.getSunatConfig(sunatTenant.tenant.id)
+      setSunatTenant({ tenant: sunatTenant.tenant, config })
     } catch (err: unknown) {
       const errMsg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error
-      toast.error(errMsg ?? 'No se pudo sincronizar credenciales PSE')
+      toast.error(errMsg ?? 'Error probando conexión')
     } finally {
-      setSyncingPSE(false)
+      setTestingConnection(false)
     }
   }
 
@@ -508,14 +603,6 @@ export default function TenantsPage() {
           <p className="text-slate-500 text-sm mt-1">Gestión de tenants del sistema</p>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={handleMigrateAll}
-            disabled={migratingAll}
-            className="flex items-center gap-2 px-3 py-2 border border-amber-300 text-amber-700 bg-amber-50 hover:bg-amber-100 rounded-lg text-xs font-medium transition-colors disabled:opacity-60"
-          >
-            <RefreshCw size={14} className={migratingAll ? 'animate-spin' : ''} />
-            {migratingAll ? 'Migrando todos...' : 'Migrar todos los tenants'}
-          </button>
           <button
             onClick={() => setShowCreate(true)}
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors"
@@ -656,33 +743,25 @@ export default function TenantsPage() {
                         <button
                           onClick={() => openEdit(t)}
                           title="Editar"
-                          className="p-1.5 rounded hover:bg-slate-100 text-slate-500 hover:text-blue-600 transition-colors"
+                          className="p-1.5 rounded text-amber-600 hover:bg-amber-50 hover:text-amber-700 transition-colors"
                         >
                           <Edit size={15} />
                         </button>
                         <button
                           onClick={() => handleToggle(t)}
                           title={t.status === 'active' ? 'Suspender' : 'Activar'}
-                          className={`p-1.5 rounded hover:bg-slate-100 transition-colors ${
+                          className={`p-1.5 rounded transition-colors ${
                             t.status === 'active'
-                              ? 'text-slate-500 hover:text-red-500'
-                              : 'text-slate-500 hover:text-emerald-600'
+                              ? 'text-red-500 hover:bg-red-50 hover:text-red-600'
+                              : 'text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700'
                           }`}
                         >
                           <Power size={15} />
                         </button>
                         <button
-                          onClick={() => handleMigrate(t)}
-                          title="Ejecutar migraciones"
-                          className="p-1.5 rounded hover:bg-slate-100 text-slate-500 hover:text-amber-600 transition-colors disabled:opacity-50"
-                          disabled={migratingId === t.id}
-                        >
-                          <RefreshCw size={15} className={migratingId === t.id ? 'animate-spin' : ''} />
-                        </button>
-                        <button
                           onClick={() => openModules(t)}
                           title="Módulos"
-                          className="p-1.5 rounded hover:bg-slate-100 text-slate-500 hover:text-violet-600 transition-colors"
+                          className="p-1.5 rounded text-violet-600 hover:bg-violet-50 hover:text-violet-700 transition-colors disabled:opacity-50"
                           disabled={loadingModules}
                         >
                           <Layers size={15} />
@@ -691,7 +770,7 @@ export default function TenantsPage() {
                           <button
                             onClick={() => openSunat(t)}
                             title="SUNAT / Facturador"
-                            className="p-1.5 rounded hover:bg-slate-100 text-slate-500 hover:text-emerald-600 transition-colors"
+                            className="p-1.5 rounded text-sky-600 hover:bg-sky-50 hover:text-sky-700 transition-colors disabled:opacity-50"
                             disabled={loadingSunat}
                           >
                             <Shield size={15} />
@@ -1057,11 +1136,11 @@ export default function TenantsPage() {
         </div>
       </Modal>
 
-      {/* ── Modal: SUNAT / Facturador ───────────────────────── */}
+      {/* ── Modal: Configuración Fiscal ───────────────────────── */}
       <Modal
         open={!!sunatTenant}
         onClose={() => setSunatTenant(null)}
-        title={`SUNAT / Facturador: ${sunatTenant?.tenant.name ?? ''}`}
+        title={`Configuración Fiscal: ${sunatTenant?.tenant.name ?? ''}`}
         maxWidth="max-w-lg"
       >
         {loadingSunat ? (
@@ -1070,61 +1149,115 @@ export default function TenantsPage() {
           </div>
         ) : sunatTenant ? (
           <div className="space-y-4">
-            <div className="bg-slate-50 rounded-lg px-3 py-2 text-xs text-slate-600">
-              RUC: <span className="font-mono font-medium">{sunatTenant.config.ruc ?? '—'}</span>
-              {' · '}
-              Razón social: {sunatTenant.config.business_name ?? '—'}
+            <div className="bg-slate-50 rounded-lg px-3 py-2 text-xs text-slate-600 flex flex-wrap items-center gap-2 justify-between">
+              <span>
+                RUC: <span className="font-mono font-medium">{sunatTenant.config.ruc ?? '—'}</span>
+                {' · '}
+                {sunatTenant.config.business_name ?? '—'}
+              </span>
+              {sunatTenant.config.connection_status ? (
+                <Badge variant={sunatTenant.config.connection_status === 'connected' ? 'green' : 'yellow'}>
+                  {sunatTenant.config.connection_status}
+                </Badge>
+              ) : null}
+              {sunatForm.send_mode !== 'pse' ? (
+                <>
+                  {sunatTenant.config.sol_configured ? (
+                    <Badge variant="green">SOL OK</Badge>
+                  ) : (
+                    <Badge variant="yellow">SOL pendiente</Badge>
+                  )}
+                  {sunatTenant.config.certificate_configured ? (
+                    <Badge variant="green">Certificado OK</Badge>
+                  ) : (
+                    <Badge variant="yellow">Certificado pendiente</Badge>
+                  )}
+                  {sunatTenant.config.logo_configured ? (
+                    <Badge variant="green">Logo OK</Badge>
+                  ) : null}
+                </>
+              ) : null}
             </div>
+            {(sunatTenant.config.certificate_file || sunatTenant.config.logo_file) && sunatForm.send_mode !== 'pse' ? (
+              <div className="text-xs text-slate-600 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2 space-y-1">
+                {sunatTenant.config.certificate_file ? (
+                  <p>
+                    Certificado registrado:{' '}
+                    <span className="font-mono text-slate-800">{sunatTenant.config.certificate_file}</span>
+                  </p>
+                ) : null}
+                {sunatTenant.config.logo_file ? (
+                  <p>
+                    Logo registrado:{' '}
+                    <span className="font-mono text-slate-800">{sunatTenant.config.logo_file}</span>
+                  </p>
+                ) : null}
+                <p className="text-slate-500">Suba un archivo nuevo solo si desea reemplazarlo.</p>
+              </div>
+            ) : null}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <FormField label="Proveedor de emisión">
+              <FormField label="Modo de emisión">
                 <select
-                  value={(sunatForm.invoicing_mode ?? 'legacy_backend').toString()}
-                  onChange={(e) => setSunatForm((f) => ({ ...f, invoicing_mode: e.target.value }))}
+                  value={sunatForm.send_mode ?? 'sunat_direct'}
+                  onChange={(e) => {
+                    const v = e.target.value
+                    setSunatForm((f) => ({
+                      ...f,
+                      send_mode: v as 'sunat_direct' | 'pse',
+                    }))
+                  }}
                   className={inputClass}
                 >
-                  <option value="legacy_backend">Actual (legacy / facturador)</option>
-                  <option value="pse">PSE (ValidaPSE)</option>
+                  <option value="sunat_direct">SUNAT Directa</option>
+                  <option value="pse">PSE</option>
                 </select>
               </FormField>
-              {(sunatForm.invoicing_mode ?? 'legacy_backend') === 'pse' ? (
+              {sunatForm.send_mode === 'pse' ? (
                 <>
-                  <FormField label="PSE Provider">
+                  <FormField label="Proveedor PSE">
+                    <select
+                      value={sunatForm.fiscal_provider ?? sunatForm.pse_provider ?? 'validapse'}
+                      onChange={(e) =>
+                        setSunatForm((f) => ({
+                          ...f,
+                          fiscal_provider: e.target.value,
+                          pse_provider: e.target.value,
+                        }))
+                      }
+                      className={inputClass}
+                    >
+                      <option value="validapse">ValidaPSE</option>
+                    </select>
+                  </FormField>
+                  <FormField label="Usuario PSE">
                     <input
-                      value={sunatForm.pse_provider ?? 'validapse'}
-                      onChange={(e) => setSunatForm((f) => ({ ...f, pse_provider: e.target.value }))}
-                      placeholder="validapse"
+                      value={sunatForm.pse_user ?? ''}
+                      onChange={(e) => setSunatForm((f) => ({ ...f, pse_user: e.target.value }))}
+                      placeholder="Usuario de credenciales ValidaPSE"
                       className={inputClass}
                     />
                   </FormField>
-                  <FormField label="PSE Base URL">
-                    <input
-                      value={sunatForm.pse_base_url ?? ''}
-                      onChange={(e) => setSunatForm((f) => ({ ...f, pse_base_url: e.target.value }))}
-                      placeholder="https://tu-pse.com"
-                      className={inputClass}
-                    />
-                  </FormField>
-                  <FormField label="PSE Token">
+                  <FormField label="Contraseña / Token de acceso">
                     <input
                       type="password"
-                      value={pseTokenInput}
-                      onChange={(e) => setPseTokenInput(e.target.value)}
-                      placeholder={sunatTenant.config.pse_token_configured ? 'Configurado (dejar vacío para no cambiar)' : 'Ingrese token'}
+                      value={psePasswordInput}
+                      onChange={(e) => setPsePasswordInput(e.target.value)}
+                      placeholder={
+                        sunatTenant.config.pse_token_configured
+                          ? 'Configurado en facturador (vacío = no cambiar)'
+                          : 'Token de acceso de ValidaPSE'
+                      }
                       className={inputClass}
                     />
                   </FormField>
-                  <div className="col-span-full flex flex-wrap items-center justify-between gap-2 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
-                    <p className="text-xs text-slate-600">
-                      En modo PSE no se requiere SOL, certificado ni logo del facturador.
+                  <div className="col-span-full bg-slate-50 border border-slate-100 rounded-lg px-3 py-2 text-xs text-slate-600 space-y-1">
+                    <p>
+                      ValidaPSE autentica con <span className="font-mono">Authorization: Bearer TOKEN</span>.
+                      La contraseña del panel es el token de acceso; el usuario se guarda para referencia.
                     </p>
-                    <button
-                      type="button"
-                      onClick={handleSyncPSE}
-                      disabled={syncingPSE}
-                      className="px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-60"
-                    >
-                      {syncingPSE ? 'Sincronizando...' : 'Sincronizar credenciales PSE'}
-                    </button>
+                    <p>
+                      La URL del API (<span className="font-mono">app.validapse.com</span>) se configura automáticamente.
+                    </p>
                   </div>
                 </>
               ) : null}
@@ -1145,23 +1278,31 @@ export default function TenantsPage() {
                 </button>
               </div>
               <FormField label="Ambiente SUNAT">
-                <select
-                  value={sunatForm.sunat_env_mode ?? 'beta'}
-                  onChange={(e) => setSunatForm((f) => ({ ...f, sunat_env_mode: e.target.value }))}
-                  className={inputClass}
-                >
-                  <option value="beta">Beta / Pruebas</option>
-                  <option value="demo">Demo</option>
-                  <option value="production">Producción</option>
-                </select>
+                {normalizeSunatEnvMode(sunatTenant.config.sunat_env_mode) === 'production' ? (
+                  <div className={`${inputClass} bg-slate-50 text-emerald-700 font-medium`}>Producción (bloqueado)</div>
+                ) : (
+                  <select
+                    value={normalizeSunatEnvMode(sunatForm.sunat_env_mode)}
+                    onChange={(e) =>
+                      setSunatForm((f) => ({
+                        ...f,
+                        sunat_env_mode: e.target.value as 'demo' | 'production',
+                      }))
+                    }
+                    className={inputClass}
+                  >
+                    <option value="demo">Pruebas</option>
+                    <option value="production">Producción</option>
+                  </select>
+                )}
               </FormField>
-              {(sunatForm.invoicing_mode ?? 'legacy_backend') !== 'pse' ? (
+              {sunatForm.send_mode !== 'pse' ? (
                 <>
                   <FormField label="Usuario SOL">
                     <input
                       value={sunatForm.sunat_sol_user ?? ''}
                       onChange={(e) => setSunatForm((f) => ({ ...f, sunat_sol_user: e.target.value }))}
-                      placeholder="MODDATOS o RUC"
+                      placeholder={sunatTenant.config.ruc ? `${sunatTenant.config.ruc}MODDATOS` : 'RUCMODDATOS'}
                       className={inputClass}
                     />
                   </FormField>
@@ -1170,7 +1311,11 @@ export default function TenantsPage() {
                       type="password"
                       value={sunatForm.sunat_sol_pass ?? ''}
                       onChange={(e) => setSunatForm((f) => ({ ...f, sunat_sol_pass: e.target.value }))}
-                      placeholder="••••••••"
+                      placeholder={
+                        sunatTenant.config.sol_configured
+                          ? 'Configurado en facturador (vacío = no cambiar)'
+                          : '••••••••'
+                      }
                       className={inputClass}
                     />
                   </FormField>
@@ -1212,12 +1357,65 @@ export default function TenantsPage() {
                 </button>
               </div>
             </div>
-            {(sunatForm.invoicing_mode ?? 'legacy_backend') !== 'pse' ? (
-              <div className="pt-3 border-t border-slate-100 space-y-2">
-                <p className="text-xs font-semibold text-slate-600">Enviar al facturador al sincronizar (opcional)</p>
-                <p className="text-xs text-slate-500">Lycet necesita un único PEM: primero clave privada, luego certificado. Puedes subir ambos por separado y este backend los combina.</p>
+            {sunatForm.send_mode !== 'pse' ? (
+              <div className="pt-3 border-t border-slate-100 space-y-3">
+                <div className="flex flex-wrap gap-4 text-sm">
+                  <label className="inline-flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="cert-input-mode"
+                      checked={certInputMode === 'pfx'}
+                      onChange={() => switchCertInputMode('pfx')}
+                      className="text-blue-600"
+                    />
+                    Certificado PFX
+                  </label>
+                  <label className="inline-flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="cert-input-mode"
+                      checked={certInputMode === 'pem'}
+                      onChange={() => switchCertInputMode('pem')}
+                      className="text-blue-600"
+                    />
+                    Archivos PEM
+                  </label>
+                </div>
                 <div className="flex flex-wrap gap-4">
-                  <FormField label="Clave privada .pem">
+                  {certInputMode === 'pfx' ? (
+                    <>
+                      <FormField label="Certificado .pfx / .p12">
+                    <input
+                      type="file"
+                      accept=".pfx,.p12"
+                      className="text-sm text-slate-600 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0]
+                        if (!f) return
+                        const r = new FileReader()
+                        r.onload = () => setSyncPfxBase64(btoa(String(r.result ?? '')))
+                        r.readAsBinaryString(f)
+                      }}
+                    />
+                    {syncPfxBase64 && <span className="text-xs text-emerald-600 ml-1">✓</span>}
+                  </FormField>
+                  <FormField label="Contraseña PFX (solo si reemplaza certificado)">
+                    <input
+                      type="password"
+                      value={certPasswordInput}
+                      onChange={(e) => setCertPasswordInput(e.target.value)}
+                      placeholder={
+                        sunatTenant.config.certificate_configured
+                          ? 'Vacío = no cambiar certificado'
+                          : 'Contraseña del archivo PFX'
+                      }
+                      className={inputClass}
+                    />
+                  </FormField>
+                    </>
+                  ) : (
+                    <>
+                  <FormField label="Clave privada .pem (opcional si sube PEM combinado)">
                     <input
                       type="file"
                       accept=".pem"
@@ -1230,9 +1428,9 @@ export default function TenantsPage() {
                         r.readAsBinaryString(f)
                       }}
                     />
-                    {syncPrivateKeyBase64 && <span className="text-xs text-emerald-600 ml-1">✓ Listo</span>}
+                    {syncPrivateKeyBase64 && <span className="text-xs text-emerald-600 ml-1">✓</span>}
                   </FormField>
-                  <FormField label="Certificado .pem">
+                  <FormField label="Certificado .pem (combinado o solo certificado)">
                     <input
                       type="file"
                       accept=".pem"
@@ -1245,8 +1443,10 @@ export default function TenantsPage() {
                         r.readAsBinaryString(f)
                       }}
                     />
-                    {syncCertBase64 && <span className="text-xs text-emerald-600 ml-1">✓ Listo</span>}
+                    {syncCertBase64 && <span className="text-xs text-emerald-600 ml-1">✓</span>}
                   </FormField>
+                    </>
+                  )}
                   <FormField label="Logo .png (para PDF)">
                     <input
                       type="file"
@@ -1271,11 +1471,19 @@ export default function TenantsPage() {
             <div className="pt-2 border-t border-slate-100 flex flex-wrap gap-2">
               <button
                 type="button"
+                onClick={handleTestFiscalConnection}
+                disabled={testingConnection || savingSunat}
+                className="px-4 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                {testingConnection ? 'Probando...' : 'Probar conexión'}
+              </button>
+              <button
+                type="button"
                 onClick={handleSaveSunat}
                 disabled={savingSunat}
                 className={btnPrimary}
               >
-                {savingSunat ? 'Guardando...' : 'Guardar datos'}
+                {savingSunat ? 'Guardando...' : 'Guardar configuración'}
               </button>
             </div>
           </div>

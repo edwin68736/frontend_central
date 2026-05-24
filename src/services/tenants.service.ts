@@ -93,6 +93,53 @@ export const ALL_MODULES: ModuleCatalogItem[] = [
   { key: 'support', name: 'Soporte / Tickets', icon: '🎫' },
 ]
 
+export interface TenantConectadoFacturador {
+  id: number
+  name: string
+  slug: string
+  ruc: string
+  sunat_connected_at: string | null
+  en_lycet: boolean
+  ambiente_lycet?: string
+  send_mode?: string
+  provider?: string
+  conexion_tipo: 'SUNAT' | 'PSE'
+  connection_status?: string
+  pse_configured?: boolean
+  enabled?: boolean
+}
+
+export interface SunatConfigResponse {
+  sunat_enabled: boolean
+  sunat_env_mode: string
+  tax_rate: number
+  igv_regime: string
+  tax_benefit_zone: boolean
+  ruc?: string
+  business_name?: string
+  send_mode?: 'sunat_direct' | 'pse' | string
+  pse_provider?: string
+  fiscal_provider?: string
+  connection_type?: 'bearer' | 'basic_auth' | 'custom' | string
+  connection_status?: string
+  fiscal_last_sync_at?: string | null
+  sunat_connected?: boolean
+  pse_base_url_configured?: boolean
+  pse_token_configured?: boolean
+  sol_configured?: boolean
+  certificate_configured?: boolean
+  /** Usuario SOL registrado en facturador (no incluye clave). */
+  sunat_sol_user?: string
+  /** Usuario PSE registrado en facturador. */
+  pse_user?: string
+  /** Nombre del archivo PEM de certificado en facturador, ej. 20123456789-cert.pem */
+  certificate_file?: string
+  /** Nombre del logo en facturador, ej. 20123456789-logo.png */
+  logo_file?: string
+  logo_configured?: boolean
+  pse_base_url?: string
+}
+
 export const tenantsService = {
   async list(q = '', status = '', regionId = '', provinciaId = ''): Promise<Tenant[]> {
     const params = new URLSearchParams()
@@ -131,10 +178,6 @@ export const tenantsService = {
     await api.post(`/superadmin/tenants/${tenantId}/modules`, { module_key, enabled })
   },
 
-  async migrate(id: number): Promise<void> {
-    await api.post(`/superadmin/tenants/${id}/migrate`)
-  },
-
   /** Elimina por completo tenant, BD MySQL y archivos locales (no toca Lycet/SUNAT). */
   async destroyComplete(
     id: number,
@@ -156,11 +199,7 @@ export const tenantsService = {
     return data
   },
 
-  async migrateAll(): Promise<void> {
-    await api.post('/superadmin/tenants/migrate-all')
-  },
-
-  /** Configuración SUNAT del tenant (para panel central). */
+  /** Empresas registradas en facturador (SUNAT + PSE). */
   async getSunatConfig(tenantId: number): Promise<SunatConfigResponse> {
     const { data } = await api.get<SunatConfigResponse>(`/superadmin/tenants/${tenantId}/sunat-config`)
     return data
@@ -170,13 +209,26 @@ export const tenantsService = {
     await api.put(`/superadmin/tenants/${tenantId}/sunat-config`, body)
   },
 
-  async setSunatEnv(tenantId: number, sunat_env_mode: 'beta' | 'demo' | 'production'): Promise<void> {
+  async testFiscalConnection(tenantId: number) {
+    const { data } = await api.post(`/superadmin/tenants/${tenantId}/fiscal-test-connection`)
+    return data
+  },
+
+  async setSunatEnv(tenantId: number, sunat_env_mode: 'demo' | 'production'): Promise<void> {
     await api.patch(`/superadmin/tenants/${tenantId}/sunat-env`, { sunat_env_mode })
   },
 
   async syncFacturador(
     tenantId: number,
-    body?: { certificate_base64?: string; private_key_base64?: string; logo_base64?: string; sol_user?: string; sol_pass?: string }
+    body?: {
+      certificate_base64?: string
+      private_key_base64?: string
+      pfx_base64?: string
+      certificate_password?: string
+      logo_base64?: string
+      sol_user?: string
+      sol_pass?: string
+    }
   ): Promise<{ success: boolean; message?: string }> {
     const { data } = await api.post<{ success: boolean; message?: string }>(
       `/superadmin/tenants/${tenantId}/sync-facturador`,
@@ -185,63 +237,30 @@ export const tenantsService = {
     return data
   },
 
-  async syncPSECredentials(tenantId: number): Promise<{
-    success: boolean
-    empresa_id?: number
-    servidor?: string
-    sunat_env_mode?: string
-    pse_token_configured?: boolean
-    pse_base_url?: string
-    invoicing_mode?: string
-    pse_provider?: string
-  }> {
-    const { data } = await api.post(`/superadmin/tenants/${tenantId}/pse/sync`)
-    return data
-  },
-
-  /** Lista de empresas conectadas con SUNAT/Lycet (BD central + Lycet). */
-  async listConectadosSunat(): Promise<TenantConectadoSunat[]> {
-    const { data } = await api.get<{ data: TenantConectadoSunat[] }>('/superadmin/tenants/conectados-sunat')
+  /** Empresas registradas en facturador (SUNAT + PSE). */
+  async listConectadosFacturador(): Promise<TenantConectadoFacturador[]> {
+    const { data } = await api.get<{ data: TenantConectadoFacturador[] }>(
+      '/superadmin/tenants/conectados-facturador'
+    )
     return data.data ?? []
   },
-}
-
-export interface TenantConectadoSunat {
-  id: number
-  name: string
-  slug: string
-  ruc: string
-  sunat_connected_at: string | null
-  en_lycet: boolean
-  /** Ambiente en el facturador Lycet: "pruebas" | "produccion" */
-  ambiente_lycet?: string
-}
-
-export interface SunatConfigResponse {
-  sunat_enabled: boolean
-  sunat_env_mode: string
-  sunat_sol_user: string
-  tax_rate: number
-  igv_regime: string
-  tax_benefit_zone: boolean
-  ruc?: string
-  business_name?: string
-  invoicing_mode?: 'legacy_backend' | 'pse' | string
-  pse_provider?: string
-  pse_base_url?: string
-  pse_token_configured?: boolean
 }
 
 export interface SunatConfigUpdate {
   sunat_enabled: boolean
   sunat_sol_user?: string
   sunat_sol_pass?: string
+  certificate?: string
   sunat_env_mode?: string
   tax_rate?: number
   igv_regime?: string
   tax_benefit_zone?: boolean
-  invoicing_mode?: 'legacy_backend' | 'pse' | string
+  send_mode?: 'sunat_direct' | 'pse' | string
   pse_provider?: string
+  fiscal_provider?: string
+  connection_type?: 'bearer' | 'basic_auth' | 'custom' | string
   pse_base_url?: string
   pse_token?: string
+  pse_user?: string
+  pse_password?: string
 }

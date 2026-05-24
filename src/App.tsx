@@ -5,8 +5,7 @@ import MainLayout from '@/layouts/MainLayout'
 import LoginPage from '@/pages/auth/LoginPage'
 import DashboardPage from '@/pages/dashboard/DashboardPage'
 import TenantsPage from '@/pages/tenants/TenantsPage'
-import EmpresasSunatPage from '@/pages/empresas-sunat/EmpresasSunatPage'
-import EmpresasPsePage from '@/pages/empresas-pse/EmpresasPsePage'
+import EmpresasFacturadorPage from '@/pages/empresas-facturador/EmpresasFacturadorPage'
 import PlansPage from '@/pages/plans/PlansPage'
 import SubscriptionsPage from '@/pages/subscriptions/SubscriptionsPage'
 import PaymentsPage from '@/pages/payments/PaymentsPage'
@@ -16,6 +15,8 @@ import SettingsPage from '@/pages/SettingsPage'
 import SaasBillingSettingsPage from '@/pages/saas/SaasBillingSettingsPage'
 import DocumentPackagesPage from '@/pages/document-packages/DocumentPackagesPage'
 import FleetMigrationsPage from '@/pages/migrations/FleetMigrationsPage'
+import FiscalDocumentsPage from '@/pages/fiscal/FiscalDocumentsPage'
+import OperacionesFiscalesPage from '@/pages/fiscal/OperacionesFiscalesPage'
 import Spinner from '@/components/ui/Spinner'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -47,8 +48,9 @@ function AppRoutes() {
       >
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/tenants" element={<TenantsPage />} />
-        <Route path="/empresas-sunat" element={<EmpresasSunatPage />} />
-        <Route path="/empresas-pse" element={<EmpresasPsePage />} />
+        <Route path="/empresas-facturador" element={<EmpresasFacturadorPage />} />
+        <Route path="/empresas-sunat" element={<Navigate to="/empresas-facturador" replace />} />
+        <Route path="/empresas-pse" element={<Navigate to="/empresas-facturador" replace />} />
         <Route path="/plans" element={<PlansPage />} />
         <Route path="/subscriptions" element={<SubscriptionsPage />} />
         <Route path="/payments" element={<PaymentsPage />} />
@@ -58,6 +60,8 @@ function AppRoutes() {
         <Route path="/saas-billing" element={<SaasBillingSettingsPage />} />
         <Route path="/document-packages" element={<DocumentPackagesPage />} />
         <Route path="/fleet-migrations" element={<FleetMigrationsPage />} />
+        <Route path="/fiscal" element={<FiscalDocumentsPage />} />
+        <Route path="/fiscal-operations" element={<OperacionesFiscalesPage />} />
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
