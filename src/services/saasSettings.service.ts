@@ -41,16 +41,27 @@ export interface SaasPlatformSettings {
   operations_key_configured?: boolean
 }
 
-const API_BASE = () => {
+/** Origen del backend sin sufijo /api (assets estáticos viven en /storage, /uploads). */
+const API_ORIGIN = (): string => {
   const fromEnv = import.meta.env.VITE_API_URL
-  if (fromEnv && String(fromEnv).startsWith('http')) return String(fromEnv).replace(/\/$/, '')
-  return 'http://localhost:3000'
+  if (fromEnv && String(fromEnv).startsWith('http')) {
+    return String(fromEnv).replace(/\/$/, '').replace(/\/api$/, '')
+  }
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname
+    if (host === 'app.tukifac.com') return 'https://api.tukifac.com'
+    if (host === 'app.tukifac.cloud') return 'https://api.tukifac.cloud'
+  }
+  // Dev con proxy Vite: /storage se proxea al backend
+  return ''
 }
 
 export function saasAssetUrl(path: string): string {
   if (!path) return ''
   if (path.startsWith('http')) return path
-  return `${API_BASE()}${path.startsWith('/') ? path : `/${path}`}`
+  const origin = API_ORIGIN()
+  const normalized = path.startsWith('/') ? path : `/${path}`
+  return origin ? `${origin}${normalized}` : normalized
 }
 
 export const saasSettingsService = {
@@ -78,8 +89,13 @@ export const saasSettingsService = {
     }).then(r => r.data)
   },
 
-  runJobs: (): Promise<{ reminders: number; status_updates: number; suspended: number }> =>
-    api.post('/superadmin/cron/saas-jobs').then(r => r.data),
+  runJobs: (): Promise<{
+    reminders: number
+    notifications: number
+    status_updates: number
+    suspended: number
+    overdue_cycles: number
+  }> => api.post('/superadmin/cron/saas-jobs').then(r => r.data),
 
   setOperationsKey: (body: {
     new_operations_key: string

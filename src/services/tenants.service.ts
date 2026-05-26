@@ -14,6 +14,7 @@ export interface Tenant {
   ubigeo: string
   plan: string
   status: string
+  rubro?: string
   db_name: string
   admin_email: string
   sunat_env_mode?: string
@@ -40,6 +41,8 @@ export interface CreateTenantInput {
   ubigeo?: string
   admin_email: string
   admin_password: string
+  /** general | gastronomico */
+  rubro?: 'general' | 'gastronomico'
   /** Duración en meses de la suscripción al crear la empresa (0 = no crear suscripción). Por defecto 1. */
   subscription_months?: number
 }

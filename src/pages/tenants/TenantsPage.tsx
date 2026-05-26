@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import { useForm } from 'react-hook-form'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { z } from 'zod'
@@ -18,6 +18,7 @@ import {
   type SunatConfigUpdate,
 } from '@/services/tenants.service'
 import { consultaService } from '@/services/consulta.service'
+import { plansService, type SaasPlan } from '@/services/plans.service'
 import { getRootDomain, getTenantHost, resolveTenantUrl } from '@/utils/tenantUrl'
 import { ubigeoService } from '@/services/ubigeo.service'
 import { UbigeoSelects, ubigeoToIds } from '@/components/UbigeoSelects'
@@ -31,6 +32,11 @@ const statusVariant = (s: string) =>
   s === 'active' ? 'green' : s === 'inactive' ? 'red' : 'yellow'
 const statusLabel = (s: string) =>
   s === 'active' ? 'Activo' : s === 'inactive' ? 'Suspendido' : s
+
+/** Fuerza minúsculas y solo caracteres válidos para subdominio (a-z, 0-9). */
+function normalizeSlugInput(raw: string): string {
+  return raw.toLowerCase().replace(/[^a-z0-9]/g, '')
+}
 
 const isProduction = (mode?: string) =>
   (mode ?? '').toLowerCase() === 'production'
@@ -149,7 +155,8 @@ const createSchema = z.object({
   email: z.string().email('Email inválido'),
   phone: z.string().optional(),
   ruc: z.string().optional(),
-  plan: z.enum(['trial', 'basic', 'pro']),
+  plan: z.string().min(1, 'Seleccione un plan'),
+  rubro: z.enum(['general', 'gastronomico']),
   admin_email: z.string().email('Email inválido'),
   admin_password: z.string().min(6, 'Mínimo 6 caracteres'),
   address: z.string().optional(),
@@ -208,6 +215,7 @@ export default function TenantsPage() {
   const [certInputMode, setCertInputMode] = useState<'pfx' | 'pem'>('pfx')
   const [syncLogoBase64, setSyncLogoBase64] = useState<string>('')
   const [consultandoRuc, setConsultandoRuc] = useState<'create' | 'edit' | null>(null)
+  const [saasPlans, setSaasPlans] = useState<SaasPlan[]>([])
 
   const fetchTenants = useCallback(async () => {
     setLoading(true)
@@ -227,6 +235,12 @@ export default function TenantsPage() {
 
   useEffect(() => {
     ubigeoService.getRegiones().then(setRegionesFilter)
+  }, [])
+  useEffect(() => {
+    plansService
+      .list()
+      .then(plans => setSaasPlans(plans.filter(p => p.active)))
+      .catch(() => {})
   }, [])
   useEffect(() => {
     if (!regionFilter) {
@@ -252,8 +266,23 @@ export default function TenantsPage() {
   const [createUbigeo, setCreateUbigeo] = useState({ regionId: '', provinciaId: '', distritoId: '' })
   const createForm = useForm<CreateForm>({
     resolver: zodResolver(createSchema),
-    defaultValues: { plan: 'trial', subscription_months: 1 },
+    defaultValues: { plan: 'trial', subscription_months: 1, rubro: 'general' },
   })
+
+  const createPlanValue = createForm.watch('plan')
+  const createRubroValue = createForm.watch('rubro')
+
+  const createPlanPreview = useMemo(() => {
+    const planKey = (createPlanValue ?? '').toLowerCase()
+    const matched = saasPlans.find(p => p.name.toLowerCase() === planKey)
+    const moduleKeys = new Set(matched?.modules ?? [])
+    const restaurantFromRubro = createRubroValue === 'gastronomico'
+    if (restaurantFromRubro) moduleKeys.add('restaurant')
+    const modules = ALL_MODULES.filter(m => moduleKeys.has(m.key))
+    const restaurantExtra =
+      restaurantFromRubro && matched && !matched.modules.includes('restaurant')
+    return { matched, modules, moduleKeys, restaurantExtra }
+  }, [saasPlans, createPlanValue, createRubroValue])
 
   const onCreateSubmit = async (data: CreateForm) => {
     try {
@@ -695,7 +724,7 @@ export default function TenantsPage() {
             <table className="w-full text-sm">
               <thead className="bg-slate-50 border-y border-slate-100">
                 <tr>
-                  {['Empresa', 'Slug', 'Email', 'RUC', 'Plan', 'Modo SUNAT', 'Estado', 'Acciones'].map((h) => (
+                  {['Empresa', 'Slug', 'Rubro', 'Email', 'RUC', 'Plan', 'Modo SUNAT', 'Estado', 'Acciones'].map((h) => (
                     <th
                       key={h}
                       className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide"
@@ -726,6 +755,11 @@ export default function TenantsPage() {
                       >
                         {t.slug}
                       </a>
+                    </td>
+                    <td className="px-4 py-3">
+                      <Badge variant={t.rubro === 'gastronomico' ? 'blue' : 'gray'}>
+                        {t.rubro === 'gastronomico' ? 'Gastronómico' : 'General'}
+                      </Badge>
                     </td>
                     <td className="px-4 py-3 text-slate-600">{t.email}</td>
                     <td className="px-4 py-3 text-slate-600">{t.ruc || '—'}</td>
@@ -818,19 +852,28 @@ export default function TenantsPage() {
             >
               <div className="flex border border-slate-200 rounded-lg overflow-hidden bg-white focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-blue-500">
                 <input
-                  {...createForm.register('slug')}
+                  {...createForm.register('slug', {
+                    onChange: e => {
+                      const normalized = normalizeSlugInput(e.target.value)
+                      if (normalized !== e.target.value) e.target.value = normalized
+                      createForm.setValue('slug', normalized, { shouldValidate: true, shouldDirty: true })
+                    },
+                  })}
                   placeholder="miempresa"
-                  className="flex-1 min-w-0 px-3 py-2 border-0 text-sm focus:outline-none focus:ring-0"
+                  className="flex-1 min-w-0 px-3 py-2 border-0 text-sm focus:outline-none focus:ring-0 lowercase"
                   autoComplete="off"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
                 />
                 <span className="flex items-center px-3 py-2 text-sm text-slate-500 font-mono bg-slate-50/80 border-l border-slate-200 whitespace-nowrap">
                   .{getRootDomain()}
                 </span>
               </div>
               <p className="text-xs text-slate-500 mt-1">
-                Se guardará el slug <span className="font-mono text-slate-700">{createForm.watch('slug') || 'subdominio'}</span>
-                {' '}y el tenant accederá a:{' '}
-                <span className="font-mono text-slate-600">{getTenantHost(createForm.watch('slug') ?? '')}</span>
+                Se guardará el slug <span className="font-mono text-blue-600">{createForm.watch('slug') || 'subdominio'}</span>
+                {' '}y el cliente accederá a:{' '}
+                <span className="font-mono text-blue-600">{getTenantHost(createForm.watch('slug') ?? '')}</span>
               </p>
             </FormField>
             <FormField label="Email *" error={createForm.formState.errors.email?.message}>
@@ -841,10 +884,39 @@ export default function TenantsPage() {
             </FormField>
             <FormField label="Plan *" error={createForm.formState.errors.plan?.message}>
               <select {...createForm.register('plan')} className={inputClass}>
-                <option value="trial">Trial</option>
-                <option value="basic">Basic</option>
-                <option value="pro">Pro</option>
+                {saasPlans.length > 0 ? (
+                  saasPlans.map(p => (
+                    <option key={p.id} value={p.name.toLowerCase()}>
+                      {p.name} — S/ {p.price.toFixed(2)} / {p.billing_cycle === 'yearly' ? 'año' : p.billing_cycle === 'lifetime' ? 'vitalicio' : 'mes'}
+                    </option>
+                  ))
+                ) : (
+                  <>
+                    <option value="trial">Trial</option>
+                    <option value="basic">Basic</option>
+                    <option value="pro">Pro</option>
+                  </>
+                )}
               </select>
+              {createPlanPreview.matched && (
+                <p className="text-xs text-slate-500 mt-1">
+                  {createPlanPreview.matched.description || 'Plan del catálogo SaaS'}
+                  {createPlanPreview.matched.is_unlimited_documents
+                    ? ' · Documentos ilimitados'
+                    : createPlanPreview.matched.monthly_documents_limit
+                      ? ` · ${createPlanPreview.matched.monthly_documents_limit} docs/mes`
+                      : ''}
+                </p>
+              )}
+            </FormField>
+            <FormField label="Rubro *" error={createForm.formState.errors.rubro?.message}>
+              <select {...createForm.register('rubro')} className={inputClass}>
+                <option value="general">General (bodegas, comercio, etc.)</option>
+                <option value="gastronomico">Gastronómico (restaurantes, bares, cafeterías)</option>
+              </select>
+              <p className="text-xs text-slate-500 mt-1">
+                Gastronómico activa el módulo restaurante y crea piso, 10 mesas y empresas de delivery por defecto.
+              </p>
             </FormField>
             <FormField label="Duración suscripción (meses)" error={createForm.formState.errors.subscription_months?.message}>
               <input
@@ -860,6 +932,42 @@ export default function TenantsPage() {
               </p>
             </FormField>
           </div>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4 space-y-3">
+            <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
+              Módulos que se habilitarán al crear
+            </p>
+            {createPlanPreview.modules.length === 0 ? (
+              <p className="text-sm text-slate-500">
+                El plan seleccionado no tiene módulos asignados en el catálogo. Revise la configuración en Planes SaaS.
+                {createRubroValue === 'gastronomico' && (
+                  <span className="block mt-1 text-emerald-700">
+                    Rubro gastronómico: se activará igual el módulo <strong>Restaurante</strong>.
+                  </span>
+                )}
+              </p>
+            ) : (
+              <>
+                <div className="flex flex-wrap gap-2">
+                  {createPlanPreview.modules.map(m => (
+                    <span
+                      key={m.key}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-xs font-medium text-slate-700"
+                    >
+                      <span>{m.icon}</span>
+                      {m.name}
+                    </span>
+                  ))}
+                </div>
+                {createPlanPreview.restaurantExtra && (
+                  <p className="text-xs text-emerald-700">
+                    Incluye <strong>Restaurante</strong> por rubro gastronómico (además del plan).
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+
           <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mt-2">Ubicación</p>
           <UbigeoSelects
             regionId={createUbigeo.regionId}
