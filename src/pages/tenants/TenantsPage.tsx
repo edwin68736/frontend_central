@@ -20,6 +20,7 @@ import {
 import { consultaService } from '@/services/consulta.service'
 import { plansService, type SaasPlan } from '@/services/plans.service'
 import { getRootDomain, getTenantHost, resolveTenantUrl } from '@/utils/tenantUrl'
+import { fileToBase64Binary, fileToBase64Text } from '@/utils/fileBase64'
 import { ubigeoService } from '@/services/ubigeo.service'
 import { UbigeoSelects, ubigeoToIds } from '@/components/UbigeoSelects'
 import { Card, CardHeader, CardBody } from '@/components/ui/Card'
@@ -535,7 +536,7 @@ export default function TenantsPage() {
           setSavingSunat(false)
           return
         }
-        if (!certConfigured && !hasNewCert) {
+        if (!certConfigured && !hasNewCert && !syncLogoBase64) {
           toast.error(
             certInputMode === 'pfx'
               ? 'Suba el certificado PFX y la contraseña'
@@ -550,11 +551,11 @@ export default function TenantsPage() {
           return
         }
       }
-      if (mode === 'sunat_direct') {
-        const needsCertSync =
-          (certInputMode === 'pfx' && !!syncPfxBase64) ||
-          (certInputMode === 'pem' && !!(syncCertBase64 || syncPrivateKeyBase64))
-        if (needsCertSync || syncLogoBase64) {
+      const needsCertSync =
+        mode === 'sunat_direct' &&
+        ((certInputMode === 'pfx' && !!syncPfxBase64) ||
+          (certInputMode === 'pem' && !!(syncCertBase64 || syncPrivateKeyBase64)))
+      if (needsCertSync || syncLogoBase64) {
         const syncBody: {
           certificate_base64?: string
           private_key_base64?: string
@@ -567,16 +568,17 @@ export default function TenantsPage() {
           sol_user: sunatForm.sunat_sol_user,
           sol_pass: sunatForm.sunat_sol_pass,
         }
-        if (certInputMode === 'pfx' && syncPfxBase64) {
-          syncBody.pfx_base64 = syncPfxBase64
-          syncBody.certificate_password = certPasswordInput.trim()
-        } else if (certInputMode === 'pem') {
-          if (syncCertBase64) syncBody.certificate_base64 = syncCertBase64
-          if (syncPrivateKeyBase64) syncBody.private_key_base64 = syncPrivateKeyBase64
+        if (mode === 'sunat_direct') {
+          if (certInputMode === 'pfx' && syncPfxBase64) {
+            syncBody.pfx_base64 = syncPfxBase64
+            syncBody.certificate_password = certPasswordInput.trim()
+          } else if (certInputMode === 'pem') {
+            if (syncCertBase64) syncBody.certificate_base64 = syncCertBase64
+            if (syncPrivateKeyBase64) syncBody.private_key_base64 = syncPrivateKeyBase64
+          }
         }
         if (syncLogoBase64) syncBody.logo_base64 = syncLogoBase64
         await tenantsService.syncFacturador(sunatTenant.tenant.id, syncBody)
-        }
       }
       await tenantsService.updateSunatConfig(sunatTenant.tenant.id, {
         sunat_enabled: sunatForm.sunat_enabled,
@@ -1497,12 +1499,14 @@ export default function TenantsPage() {
                       type="file"
                       accept=".pfx,.p12"
                       className="text-sm text-slate-600 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200"
-                      onChange={(e) => {
+                      onChange={async (e) => {
                         const f = e.target.files?.[0]
                         if (!f) return
-                        const r = new FileReader()
-                        r.onload = () => setSyncPfxBase64(btoa(String(r.result ?? '')))
-                        r.readAsBinaryString(f)
+                        try {
+                          setSyncPfxBase64(await fileToBase64Binary(f))
+                        } catch {
+                          toast.error('No se pudo leer el archivo PFX')
+                        }
                       }}
                     />
                     {syncPfxBase64 && <span className="text-xs text-emerald-600 ml-1">✓</span>}
@@ -1528,12 +1532,14 @@ export default function TenantsPage() {
                       type="file"
                       accept=".pem"
                       className="text-sm text-slate-600 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200"
-                      onChange={(e) => {
+                      onChange={async (e) => {
                         const f = e.target.files?.[0]
                         if (!f) return
-                        const r = new FileReader()
-                        r.onload = () => setSyncPrivateKeyBase64(btoa(String(r.result ?? '')))
-                        r.readAsBinaryString(f)
+                        try {
+                          setSyncPrivateKeyBase64(await fileToBase64Text(f))
+                        } catch {
+                          toast.error('No se pudo leer la clave privada')
+                        }
                       }}
                     />
                     {syncPrivateKeyBase64 && <span className="text-xs text-emerald-600 ml-1">✓</span>}
@@ -1543,39 +1549,48 @@ export default function TenantsPage() {
                       type="file"
                       accept=".pem"
                       className="text-sm text-slate-600 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200"
-                      onChange={(e) => {
+                      onChange={async (e) => {
                         const f = e.target.files?.[0]
                         if (!f) return
-                        const r = new FileReader()
-                        r.onload = () => setSyncCertBase64(btoa(String(r.result ?? '')))
-                        r.readAsBinaryString(f)
+                        try {
+                          setSyncCertBase64(await fileToBase64Text(f))
+                        } catch {
+                          toast.error('No se pudo leer el certificado PEM')
+                        }
                       }}
                     />
                     {syncCertBase64 && <span className="text-xs text-emerald-600 ml-1">✓</span>}
                   </FormField>
                     </>
                   )}
-                  <FormField label="Logo .png (para PDF)">
-                    <input
-                      type="file"
-                      accept=".png,image/png"
-                      className="text-sm text-slate-600 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200"
-                      onChange={(e) => {
-                        const f = e.target.files?.[0]
-                        if (!f) return
-                        const r = new FileReader()
-                        r.onload = () => {
-                          const s = (r.result as string) || ''
-                          if (s.includes(',')) setSyncLogoBase64(s.split(',')[1])
-                        }
-                        r.readAsDataURL(f)
-                      }}
-                    />
-                    {syncLogoBase64 && <span className="text-xs text-emerald-600 ml-1">✓ Listo</span>}
-                  </FormField>
                 </div>
               </div>
             ) : null}
+            <div className="pt-3 border-t border-slate-100">
+              <FormField label="Logo .png (para PDF)">
+                <input
+                  type="file"
+                  accept=".png,image/png"
+                  className="text-sm text-slate-600 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0]
+                    if (!f) return
+                    const r = new FileReader()
+                    r.onload = () => {
+                      const s = (r.result as string) || ''
+                      if (s.includes(',')) setSyncLogoBase64(s.split(',')[1])
+                    }
+                    r.readAsDataURL(f)
+                  }}
+                />
+                {syncLogoBase64 && <span className="text-xs text-emerald-600 ml-1">✓ Listo</span>}
+                {sunatTenant.config.logo_file ? (
+                  <p className="text-xs text-slate-500 mt-1">
+                    Actual: <span className="font-mono">{sunatTenant.config.logo_file}</span>
+                  </p>
+                ) : null}
+              </FormField>
+            </div>
             <div className="pt-2 border-t border-slate-100 flex flex-wrap gap-2">
               <button
                 type="button"
