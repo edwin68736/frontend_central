@@ -21,6 +21,7 @@ import {
   type BankAccountConfig,
   type SaasPlatformSettings,
 } from '@/services/saasSettings.service'
+import { apiErrorMessage } from '@/utils/apiError'
 
 const inputClass =
   'w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white'
@@ -136,8 +137,8 @@ export default function SaasBillingSettingsPage() {
         f ? (kind === 'yape' ? { ...f, yape_qr_url: r.url } : { ...f, plin_qr_url: r.url }) : f,
       )
       toast.success(`QR ${kind} actualizado`)
-    } catch {
-      toast.error('Error subiendo QR')
+    } catch (e) {
+      toast.error(apiErrorMessage(e, 'Error subiendo QR'))
     } finally {
       setUploading(null)
     }
