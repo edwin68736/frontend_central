@@ -24,7 +24,7 @@ import {
 const navItems = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/tenants', label: 'Empresas', icon: Building2 },
-  { to: '/fleet-migrations', label: 'Fleet Migrations', icon: GitBranch },
+  { to: '/fleet-migrations', label: 'Migraciones', icon: GitBranch },
   { to: '/fiscal', label: 'Documentos fiscales', icon: FileStack },
   { to: '/fiscal-operations', label: 'Operaciones fiscales', icon: Activity },
   { to: '/empresas-facturador', label: 'Facturador', icon: FileCheck },

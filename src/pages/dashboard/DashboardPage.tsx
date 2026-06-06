@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Building2, CheckCircle, XCircle, TrendingUp, ArrowRight } from 'lucide-react'
+import { Building2, CheckCircle, XCircle, TrendingUp, ArrowRight, GitBranch, AlertTriangle } from 'lucide-react'
 import { dashboardService, DashboardData } from '@/services/dashboard.service'
+import { migrationsService, type MigrationSummary } from '@/services/migrations.service'
 import { Card, CardBody, CardHeader } from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
 import Spinner from '@/components/ui/Spinner'
@@ -41,13 +42,19 @@ const statusLabel = (s: string) =>
 
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null)
+  const [migSummary, setMigSummary] = useState<MigrationSummary | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
   useEffect(() => {
-    dashboardService
-      .getStats()
-      .then(setData)
+    Promise.all([
+      dashboardService.getStats(),
+      migrationsService.summary().catch(() => null),
+    ])
+      .then(([dash, mig]) => {
+        setData(dash)
+        setMigSummary(mig)
+      })
       .catch(() => setError('No se pudo cargar el dashboard'))
       .finally(() => setLoading(false))
   }, [])
@@ -89,6 +96,61 @@ export default function DashboardPage() {
         <StatCard label="Suspendidas" value={stats.inactive} icon={XCircle} color="bg-red-500" />
         <StatCard label="Plan Pro" value={stats.pro} icon={TrendingUp} color="bg-violet-500" />
       </div>
+
+      {migSummary && (
+        <Card className={migSummary.circuit_open || (migSummary.drifted ?? 0) > 0 || migSummary.failed > 0 ? 'border-amber-300' : ''}>
+          <CardHeader className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <GitBranch size={18} className="text-slate-600" />
+              <h2 className="font-semibold text-slate-700">Salud del esquema (migraciones)</h2>
+            </div>
+            <Link to="/fleet-migrations" className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1">
+              Gestionar <ArrowRight size={14} />
+            </Link>
+          </CardHeader>
+          <CardBody>
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-4 text-center">
+              <div>
+                <p className="text-xl font-bold text-emerald-600">{migSummary.completed}</p>
+                <p className="text-xs text-slate-500">Actualizados</p>
+              </div>
+              <div>
+                <p className="text-xl font-bold text-amber-600">{migSummary.pending}</p>
+                <p className="text-xs text-slate-500">Pendientes</p>
+              </div>
+              <div>
+                <p className="text-xl font-bold text-red-600">{migSummary.failed}</p>
+                <p className="text-xs text-slate-500">Fallidos</p>
+              </div>
+              <div>
+                <p className="text-xl font-bold text-orange-600">{migSummary.drifted ?? 0}</p>
+                <p className="text-xs text-slate-500">Con drift</p>
+              </div>
+              <div>
+                <p className="text-xl font-bold text-slate-700">V{migSummary.schema_target_version}</p>
+                <p className="text-xs text-slate-500">Target</p>
+              </div>
+              <div>
+                <p className="text-xl font-bold text-slate-700">
+                  {migSummary.total > 0 ? Math.round((migSummary.completed / migSummary.total) * 100) : 0}%
+                </p>
+                <p className="text-xs text-slate-500">Progreso</p>
+              </div>
+            </div>
+            {(migSummary.circuit_open || (migSummary.drifted ?? 0) > 0) && (
+              <div className="mt-4 flex items-start gap-2 text-sm text-amber-800 bg-amber-50 rounded-lg p-3">
+                <AlertTriangle size={16} className="mt-0.5 flex-shrink-0" />
+                <div>
+                  {migSummary.circuit_open && <p>Circuit breaker abierto — fleet pausado.</p>}
+                  {(migSummary.drifted ?? 0) > 0 && (
+                    <p>{migSummary.drifted} tenant(s) con inconsistencias de esquema.</p>
+                  )}
+                </div>
+              </div>
+            )}
+          </CardBody>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Plan chart */}
