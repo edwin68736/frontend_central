@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import {
   Banknote,
@@ -11,6 +11,8 @@ import {
   Settings2,
   Headphones,
   AlertTriangle,
+  Trash2,
+  Upload,
 } from 'lucide-react'
 import { Card, CardBody, CardHeader } from '@/components/ui/Card'
 import Spinner from '@/components/ui/Spinner'
@@ -89,6 +91,10 @@ export default function SaasBillingSettingsPage() {
   const [savingSection, setSavingSection] = useState<SaveSection | null>(null)
   const [reminderInput, setReminderInput] = useState('7,5,3,1')
   const [uploading, setUploading] = useState<'yape' | 'plin' | null>(null)
+  const [clearingQr, setClearingQr] = useState<'yape' | 'plin' | null>(null)
+  const [qrPreviewVersion, setQrPreviewVersion] = useState({ yape: 0, plin: 0 })
+  const yapeFileRef = useRef<HTMLInputElement>(null)
+  const plinFileRef = useRef<HTMLInputElement>(null)
   const [opsNewKey, setOpsNewKey] = useState('')
   const [opsCurrentKey, setOpsCurrentKey] = useState('')
   const [opsSaving, setOpsSaving] = useState(false)
@@ -129,6 +135,15 @@ export default function SaasBillingSettingsPage() {
     }
   }
 
+  const qrFileRef = (kind: 'yape' | 'plin') => (kind === 'yape' ? yapeFileRef : plinFileRef)
+
+  const qrPreviewSrc = (kind: 'yape' | 'plin', url: string) => {
+    if (!url) return ''
+    const v = qrPreviewVersion[kind]
+    const base = saasAssetUrl(url)
+    return v > 0 ? `${base}${base.includes('?') ? '&' : '?'}v=${v}` : base
+  }
+
   const uploadQr = async (kind: 'yape' | 'plin', file: File) => {
     setUploading(kind)
     try {
@@ -136,11 +151,34 @@ export default function SaasBillingSettingsPage() {
       setForm((f) =>
         f ? (kind === 'yape' ? { ...f, yape_qr_url: r.url } : { ...f, plin_qr_url: r.url }) : f,
       )
+      setQrPreviewVersion((v) => ({ ...v, [kind]: Date.now() }))
       toast.success(`QR ${kind} actualizado`)
     } catch (e) {
       toast.error(apiErrorMessage(e, 'Error subiendo QR'))
     } finally {
       setUploading(null)
+      const input = qrFileRef(kind).current
+      if (input) input.value = ''
+    }
+  }
+
+  const clearQr = async (kind: 'yape' | 'plin') => {
+    const payload = buildPayload()
+    if (!payload) return
+    if (kind === 'yape') payload.yape_qr_url = ''
+    else payload.plin_qr_url = ''
+    setClearingQr(kind)
+    try {
+      await saasSettingsService.save(payload)
+      setForm((f) =>
+        f ? (kind === 'yape' ? { ...f, yape_qr_url: '' } : { ...f, plin_qr_url: '' }) : f,
+      )
+      setQrPreviewVersion((v) => ({ ...v, [kind]: 0 }))
+      toast.success(`QR ${kind} eliminado`)
+    } catch (e) {
+      toast.error(apiErrorMessage(e, 'Error al quitar QR'))
+    } finally {
+      setClearingQr(null)
     }
   }
 
@@ -524,13 +562,16 @@ export default function SaasBillingSettingsPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {(['yape', 'plin'] as const).map((kind) => {
                 const url = kind === 'yape' ? form.yape_qr_url : form.plin_qr_url
+                const busy = uploading === kind || clearingQr === kind
+                const previewSrc = qrPreviewSrc(kind, url)
                 return (
                   <div key={kind} className="border border-slate-200 rounded-xl p-4 space-y-3">
                     <p className="text-sm font-semibold text-slate-700 capitalize">{kind}</p>
-                    {url ? (
+                    {url && previewSrc ? (
                       <img
-                        src={saasAssetUrl(url)}
-                        alt={kind}
+                        key={previewSrc}
+                        src={previewSrc}
+                        alt={`QR ${kind}`}
                         className="h-32 w-full object-contain border border-slate-100 rounded-lg bg-white"
                       />
                     ) : (
@@ -538,28 +579,50 @@ export default function SaasBillingSettingsPage() {
                         Sin imagen
                       </div>
                     )}
-                    <label className="block text-xs text-slate-500">
-                      Subir imagen
-                      <input
-                        type="file"
-                        accept="image/*"
-                        disabled={uploading === kind}
-                        className="mt-1 block w-full text-xs"
-                        onChange={(e) => {
-                          const f = e.target.files?.[0]
-                          if (f) void uploadQr(kind, f)
-                        }}
-                      />
-                    </label>
+                    <input
+                      ref={qrFileRef(kind)}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/*"
+                      className="hidden"
+                      disabled={busy}
+                      onChange={(e) => {
+                        const f = e.target.files?.[0]
+                        if (f) void uploadQr(kind, f)
+                      }}
+                    />
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => qrFileRef(kind).current?.click()}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+                      >
+                        <Upload size={14} />
+                        {uploading === kind ? 'Subiendo…' : url ? 'Cambiar imagen' : 'Subir imagen'}
+                      </button>
+                      {url ? (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => void clearQr(kind)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-red-200 text-red-700 hover:bg-red-50 disabled:opacity-50"
+                        >
+                          <Trash2 size={14} />
+                          {clearingQr === kind ? 'Quitando…' : 'Quitar QR'}
+                        </button>
+                      ) : null}
+                    </div>
+                    {url ? (
+                      <p className="text-[11px] text-slate-400 break-all">{url}</p>
+                    ) : null}
                   </div>
                 )
               })}
             </div>
             <p className="text-xs text-slate-500 mt-3">
-              Las imágenes se guardan al subirlas en el servidor, carpeta{' '}
-              <code className="text-slate-600 bg-slate-100 px-1 rounded">storage/saas/</code> (p. ej.{' '}
-              <code className="text-slate-600 bg-slate-100 px-1 rounded">qr_yape.png</code>,{' '}
-              <code className="text-slate-600 bg-slate-100 px-1 rounded">qr_plin.png</code>).
+              Las imágenes se guardan al subirlas (JPG, PNG o WebP, máx. 10 MB) en{' '}
+              <code className="text-slate-600 bg-slate-100 px-1 rounded">storage/saas/</code>. Al reemplazar
+              una imagen, use <strong>Cambiar imagen</strong>; la vista previa se actualiza de inmediato.
             </p>
           </CardBody>
         </Card>
