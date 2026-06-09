@@ -18,7 +18,7 @@ import { Card, CardBody, CardHeader } from '@/components/ui/Card'
 import Spinner from '@/components/ui/Spinner'
 import Modal from '@/components/ui/Modal'
 import {
-  saasAssetUrl,
+  saasQrPreviewUrl,
   saasSettingsService,
   type BankAccountConfig,
   type SaasPlatformSettings,
@@ -139,18 +139,24 @@ export default function SaasBillingSettingsPage() {
 
   const qrPreviewSrc = (kind: 'yape' | 'plin', url: string) => {
     if (!url) return ''
-    const v = qrPreviewVersion[kind]
-    const base = saasAssetUrl(url)
-    return v > 0 ? `${base}${base.includes('?') ? '&' : '?'}v=${v}` : base
+    const v = qrPreviewVersion[kind] || form?.updated_at || ''
+    return saasQrPreviewUrl(url, v)
   }
 
   const uploadQr = async (kind: 'yape' | 'plin', file: File) => {
     setUploading(kind)
     try {
       const r = await saasSettingsService.uploadQr(kind, file)
-      setForm((f) =>
-        f ? (kind === 'yape' ? { ...f, yape_qr_url: r.url } : { ...f, plin_qr_url: r.url }) : f,
-      )
+      const refreshed = await saasSettingsService.get()
+      setForm((f) => {
+        if (!f) return f
+        return {
+          ...f,
+          ...refreshed,
+          yape_qr_url: kind === 'yape' ? r.url : refreshed.yape_qr_url,
+          plin_qr_url: kind === 'plin' ? r.url : refreshed.plin_qr_url,
+        }
+      })
       setQrPreviewVersion((v) => ({ ...v, [kind]: Date.now() }))
       toast.success(`QR ${kind} actualizado`)
     } catch (e) {

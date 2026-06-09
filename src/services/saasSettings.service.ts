@@ -39,6 +39,7 @@ export interface SaasPlatformSettings {
   portal_url_override: string
   support: SupportConfig
   operations_key_configured?: boolean
+  updated_at?: string
 }
 
 /** Origen del backend sin sufijo /api (assets estáticos viven en /storage, /uploads). */
@@ -62,6 +63,16 @@ export function saasAssetUrl(path: string): string {
   const origin = API_ORIGIN()
   const normalized = path.startsWith('/') ? path : `/${path}`
   return origin ? `${origin}${normalized}` : normalized
+}
+
+/** URL de preview con bust de caché (nombre qr_yape_1738….png o updated_at del settings). */
+export function saasQrPreviewUrl(path: string, cacheToken?: string | number): string {
+  const base = saasAssetUrl(path)
+  if (!base) return ''
+  const stampFromPath = path.match(/_(\d{10,})\.(jpe?g|png|webp)$/i)?.[1]
+  const token = stampFromPath ?? (cacheToken != null && cacheToken !== '' ? String(cacheToken) : '')
+  if (!token) return base
+  return `${base}${base.includes('?') ? '&' : '?'}v=${token}`
 }
 
 export const saasSettingsService = {
