@@ -206,6 +206,7 @@ export default function TenantsPage() {
   const [savingSunat, setSavingSunat] = useState(false)
   const [sunatForm, setSunatForm] = useState<SunatConfigUpdate & { sunat_sol_pass?: string }>({ sunat_enabled: false })
   const [psePasswordInput, setPsePasswordInput] = useState('')
+  const [greClientSecretInput, setGreClientSecretInput] = useState('')
   const [testingConnection, setTestingConnection] = useState(false)
 
   const sendMode = (cfg?: { send_mode?: string }) => cfg?.send_mode ?? 'sunat_direct'
@@ -483,10 +484,12 @@ export default function TenantsPage() {
     setCertPasswordInput('')
     setSyncLogoBase64('')
     setPsePasswordInput('')
+    setGreClientSecretInput('')
     setCertInputMode('pfx')
     clearCertUploads()
     try {
       const config = await tenantsService.getSunatConfig(t.id)
+      const mode = sendMode(config)
       setSunatTenant({ tenant: t, config })
       setSunatForm({
         sunat_enabled: config.sunat_enabled,
@@ -495,10 +498,14 @@ export default function TenantsPage() {
         tax_rate: config.tax_rate ?? 18,
         igv_regime: config.igv_regime ?? 'standard',
         tax_benefit_zone: config.tax_benefit_zone ?? false,
-        send_mode: sendMode(config),
-        pse_provider: config.pse_provider ?? config.fiscal_provider ?? 'validapse',
-        fiscal_provider: config.fiscal_provider ?? config.pse_provider ?? 'validapse',
+        send_mode: mode,
+        pse_provider: mode === 'pse' ? (config.pse_provider ?? config.fiscal_provider ?? 'validapse') : undefined,
+        fiscal_provider:
+          mode === 'pse'
+            ? (config.fiscal_provider ?? config.pse_provider ?? 'validapse')
+            : 'sunat',
         pse_user: config.pse_user ?? '',
+        gre_client_id: config.gre_client_id ?? '',
       })
     } catch {
       toast.error('Error cargando configuración SUNAT')
@@ -551,6 +558,20 @@ export default function TenantsPage() {
           return
         }
       }
+      const isProduction = normalizeSunatEnvMode(sunatForm.sunat_env_mode) === 'production'
+      if (isProduction) {
+        const apiConfigured = !!sunatTenant.config.gre_client_configured
+        if (!sunatForm.gre_client_id?.trim() && !apiConfigured) {
+          toast.error('Ingrese Client ID SUNAT API (requerido en producción)')
+          setSavingSunat(false)
+          return
+        }
+        if (!greClientSecretInput.trim() && !apiConfigured) {
+          toast.error('Ingrese Client Secret SUNAT API (requerido en producción)')
+          setSavingSunat(false)
+          return
+        }
+      }
       const needsCertSync =
         mode === 'sunat_direct' &&
         ((certInputMode === 'pfx' && !!syncPfxBase64) ||
@@ -589,10 +610,19 @@ export default function TenantsPage() {
         igv_regime: sunatForm.igv_regime,
         tax_benefit_zone: sunatForm.tax_benefit_zone,
         send_mode: mode,
-        fiscal_provider: sunatForm.fiscal_provider ?? sunatForm.pse_provider ?? 'validapse',
-        pse_provider: sunatForm.pse_provider ?? sunatForm.fiscal_provider ?? 'validapse',
+        fiscal_provider: mode === 'pse' ? (sunatForm.fiscal_provider ?? sunatForm.pse_provider ?? 'validapse') : 'sunat',
+        pse_provider:
+          mode === 'pse'
+            ? (sunatForm.pse_provider ?? sunatForm.fiscal_provider ?? 'validapse')
+            : undefined,
         pse_user: sunatForm.pse_user,
         pse_password: psePasswordInput.trim() || undefined,
+        ...(isProduction
+          ? {
+              gre_client_id: sunatForm.gre_client_id?.trim() || undefined,
+              gre_client_secret: greClientSecretInput.trim() || undefined,
+            }
+          : {}),
       })
       toast.success('Configuración fiscal guardada y sincronizada')
       fetchTenants()
@@ -1406,6 +1436,35 @@ export default function TenantsPage() {
                   </select>
                 )}
               </FormField>
+              {normalizeSunatEnvMode(sunatForm.sunat_env_mode) === 'production' ? (
+                <>
+                  <FormField label="Client ID SUNAT API">
+                    <input
+                      value={sunatForm.gre_client_id ?? ''}
+                      onChange={(e) => setSunatForm((f) => ({ ...f, gre_client_id: e.target.value }))}
+                      placeholder={
+                        sunatTenant.config.gre_client_configured
+                          ? sunatTenant.config.gre_client_id ?? 'Configurado en facturador'
+                          : 'OAuth Client ID SUNAT API'
+                      }
+                      className={inputClass}
+                    />
+                  </FormField>
+                  <FormField label="Client Secret SUNAT API">
+                    <input
+                      type="password"
+                      value={greClientSecretInput}
+                      onChange={(e) => setGreClientSecretInput(e.target.value)}
+                      placeholder={
+                        sunatTenant.config.gre_client_configured
+                          ? 'Configurado en facturador (vacío = no cambiar)'
+                          : 'OAuth Client Secret SUNAT API'
+                      }
+                      className={inputClass}
+                    />
+                  </FormField>
+                </>
+              ) : null}
               {sunatForm.send_mode !== 'pse' ? (
                 <>
                   <FormField label="Usuario SOL">

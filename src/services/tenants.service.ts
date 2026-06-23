@@ -141,6 +141,8 @@ export interface SunatConfigResponse {
   logo_file?: string
   logo_configured?: boolean
   pse_base_url?: string
+  gre_client_configured?: boolean
+  gre_client_id?: string
 }
 
 export const tenantsService = {
@@ -266,4 +268,6 @@ export interface SunatConfigUpdate {
   pse_token?: string
   pse_user?: string
   pse_password?: string
+  gre_client_id?: string
+  gre_client_secret?: string
 }
