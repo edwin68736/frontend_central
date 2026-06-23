@@ -1340,10 +1340,12 @@ export default function TenantsPage() {
                 <select
                   value={sunatForm.send_mode ?? 'sunat_direct'}
                   onChange={(e) => {
-                    const v = e.target.value
+                    const v = e.target.value as 'sunat_direct' | 'pse'
                     setSunatForm((f) => ({
                       ...f,
-                      send_mode: v as 'sunat_direct' | 'pse',
+                      send_mode: v,
+                      fiscal_provider: v === 'pse' ? 'validapse' : 'sunat',
+                      pse_provider: v === 'pse' ? 'validapse' : undefined,
                     }))
                   }}
                   className={inputClass}
