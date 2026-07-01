@@ -19,7 +19,7 @@ import {
 } from '@/services/tenants.service'
 import { consultaService } from '@/services/consulta.service'
 import { plansService, type SaasPlan } from '@/services/plans.service'
-import { getRootDomain, getTenantHost, resolveTenantUrl, normalizeTenantPublicUrl } from '@/utils/tenantUrl'
+import { getRootDomain, getTenantHost, resolveTenantUrl, buildMasterAccessUrl } from '@/utils/tenantUrl'
 import { fileToBase64Binary, fileToBase64Text } from '@/utils/fileBase64'
 import { ubigeoService } from '@/services/ubigeo.service'
 import { UbigeoSelects, ubigeoToIds } from '@/components/UbigeoSelects'
@@ -427,9 +427,8 @@ export default function TenantsPage() {
     if (!masterAccessTenant) return
     setMasterAccessLoading(true)
     try {
-      const { tenant_url, token } = await tenantsService.masterAccess(masterAccessTenant.id)
-      const base = normalizeTenantPublicUrl(tenant_url || resolveTenantUrl(masterAccessTenant))
-      const url = `${base}/auth/sso?token=${encodeURIComponent(token)}`
+      const { token } = await tenantsService.masterAccess(masterAccessTenant.id)
+      const url = buildMasterAccessUrl(masterAccessTenant, token)
       window.open(url, '_blank', 'noopener,noreferrer')
       toast.success(`Acceso maestro abierto para ${masterAccessTenant.name}`)
       setMasterAccessTenant(null)

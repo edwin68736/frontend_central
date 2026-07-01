@@ -56,6 +56,15 @@ export function getTenantUrl(slug: string): string {
   return `${protocol}://${host}`
 }
 
+/** URL de acceso maestro: misma base que el enlace slug + token en query. */
+export function buildMasterAccessUrl(
+  tenant: { slug: string; tenant_url?: string },
+  token: string,
+): string {
+  const base = resolveTenantUrl(tenant)
+  return `${base}/?master_sso=${encodeURIComponent(token)}`
+}
+
 /** Prefiere tenant_url de la API; si no, construye con root domain. */
 export function resolveTenantUrl(tenant: { slug: string; tenant_url?: string }): string {
   if (tenant.tenant_url) return normalizeTenantPublicUrl(tenant.tenant_url)
