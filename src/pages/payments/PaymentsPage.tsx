@@ -45,11 +45,11 @@ export default function PaymentsPage() {
       const [p, pl, t] = await Promise.all([
         paymentsService.list(filterStatus),
         plansService.list(),
-        tenantsService.list(),
+        tenantsService.list({ page: 1, per_page: 100 }),
       ])
       setPayments(p)
       setPlans(pl.filter(p => p.active))
-      setTenants(t)
+      setTenants(t.data)
     } catch { toast.error('Error cargando pagos') }
     finally { setLoading(false) }
   }

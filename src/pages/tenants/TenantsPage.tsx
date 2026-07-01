@@ -27,6 +27,8 @@ import { Card, CardHeader, CardBody } from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
 import Modal from '@/components/ui/Modal'
 import Spinner from '@/components/ui/Spinner'
+import PaginationBar from '@/components/ui/PaginationBar'
+import type { PerPageOption } from '@/services/pagination'
 
 /* ─── helpers ─────────────────────────────────────────────── */
 const statusVariant = (s: string) =>
@@ -220,18 +222,35 @@ export default function TenantsPage() {
   const [syncLogoBase64, setSyncLogoBase64] = useState<string>('')
   const [consultandoRuc, setConsultandoRuc] = useState<'create' | 'edit' | null>(null)
   const [saasPlans, setSaasPlans] = useState<SaasPlan[]>([])
+  const [page, setPage] = useState(1)
+  const [perPage, setPerPage] = useState<PerPageOption>(25)
+  const [total, setTotal] = useState(0)
+  const [totalPages, setTotalPages] = useState(0)
 
   const fetchTenants = useCallback(async () => {
     setLoading(true)
     try {
-      const data = await tenantsService.list(search, statusFilter, regionFilter, provinciaFilter)
-      setTenants(data)
+      const res = await tenantsService.list({
+        q: search,
+        status: statusFilter,
+        region_id: regionFilter,
+        provincia_id: provinciaFilter,
+        page,
+        per_page: perPage,
+      })
+      setTenants(res.data)
+      setTotal(res.total)
+      setTotalPages(res.total_pages)
     } catch {
       toast.error('Error cargando empresas')
     } finally {
       setLoading(false)
     }
-  }, [search, statusFilter, regionFilter, provinciaFilter])
+  }, [search, statusFilter, regionFilter, provinciaFilter, page, perPage])
+
+  useEffect(() => {
+    setPage(1)
+  }, [search, statusFilter, regionFilter, provinciaFilter, perPage])
 
   useEffect(() => {
     fetchTenants()
@@ -258,12 +277,20 @@ export default function TenantsPage() {
   // Abrir modal SUNAT si se navegó desde Empresas SUNAT con openSunatId
   const openSunatId = (location.state as { openSunatId?: number })?.openSunatId
   useEffect(() => {
-    if (!openSunatId || tenants.length === 0) return
+    if (!openSunatId) return
     const tenant = tenants.find((t) => t.id === openSunatId)
     if (tenant) {
       openSunat(tenant)
       navigate('/tenants', { replace: true, state: {} })
+      return
     }
+    tenantsService
+      .get(openSunatId)
+      .then(({ data }) => {
+        openSunat(data)
+        navigate('/tenants', { replace: true, state: {} })
+      })
+      .catch(() => {})
   }, [openSunatId, tenants])
 
   /* ── Create form ─────────────── */
@@ -763,20 +790,22 @@ export default function TenantsPage() {
       <Card>
         <CardHeader>
           <p className="text-sm text-slate-500">
-            {loading ? 'Cargando...' : `${tenants.length} empresa(s) encontrada(s)`}
+            {loading ? 'Cargando...' : `${total} empresa(s) encontrada(s)`}
           </p>
         </CardHeader>
         {loading ? (
           <CardBody className="flex justify-center py-12">
             <Spinner size={32} />
           </CardBody>
-        ) : tenants.length === 0 ? (
-          <CardBody>
-            <p className="text-slate-400 text-sm text-center py-8">No se encontraron empresas</p>
-          </CardBody>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+          <>
+            {tenants.length === 0 ? (
+              <CardBody>
+                <p className="text-slate-400 text-sm text-center py-8">No se encontraron empresas</p>
+              </CardBody>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
               <thead className="bg-slate-50 border-y border-slate-100">
                 <tr>
                   {['Empresa', 'Slug', 'Rubro', 'Email', 'RUC', 'Plan', 'Modo SUNAT', 'Estado', 'Acciones'].map((h) => (
@@ -878,7 +907,18 @@ export default function TenantsPage() {
                 ))}
               </tbody>
             </table>
-          </div>
+              </div>
+            )}
+            <PaginationBar
+              page={page}
+              perPage={perPage}
+              total={total}
+              totalPages={totalPages}
+              onPageChange={setPage}
+              onPerPageChange={setPerPage}
+              itemLabel="empresas"
+            />
+          </>
         )}
       </Card>
 

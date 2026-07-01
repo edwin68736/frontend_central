@@ -164,7 +164,7 @@ export default function FiscalDocumentsPage() {
   }, [fetchStats, fetchDocuments])
 
   useEffect(() => {
-    tenantsService.list('', '', '', '').then(setTenants).catch(() => {})
+    tenantsService.list({ page: 1, per_page: 100 }).then(r => setTenants(r.data)).catch(() => {})
   }, [])
 
   useEffect(() => {

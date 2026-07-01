@@ -1,4 +1,14 @@
 import { api } from './api'
+import type { PaginatedResponse } from './pagination'
+
+export interface TenantListParams {
+  q?: string
+  status?: string
+  region_id?: string
+  provincia_id?: string
+  page?: number
+  per_page?: number
+}
 
 export interface Tenant {
   id: number
@@ -146,14 +156,22 @@ export interface SunatConfigResponse {
 }
 
 export const tenantsService = {
-  async list(q = '', status = '', regionId = '', provinciaId = ''): Promise<Tenant[]> {
-    const params = new URLSearchParams()
-    if (q) params.set('q', q)
-    if (status) params.set('status', status)
-    if (regionId) params.set('region_id', regionId)
-    if (provinciaId) params.set('provincia_id', provinciaId)
-    const { data } = await api.get<{ data: Tenant[] }>(`/superadmin/tenants?${params}`)
-    return data.data ?? []
+  async list(params: TenantListParams = {}): Promise<PaginatedResponse<Tenant>> {
+    const searchParams = new URLSearchParams()
+    if (params.q) searchParams.set('q', params.q)
+    if (params.status) searchParams.set('status', params.status)
+    if (params.region_id) searchParams.set('region_id', params.region_id)
+    if (params.provincia_id) searchParams.set('provincia_id', params.provincia_id)
+    if (params.page) searchParams.set('page', String(params.page))
+    if (params.per_page) searchParams.set('per_page', String(params.per_page))
+    const { data } = await api.get<PaginatedResponse<Tenant>>(`/superadmin/tenants?${searchParams}`)
+    return {
+      data: data.data ?? [],
+      page: data.page ?? 1,
+      per_page: data.per_page ?? 25,
+      total: data.total ?? 0,
+      total_pages: data.total_pages ?? 0,
+    }
   },
 
   async get(id: number): Promise<{ data: Tenant; modules: TenantModule[] }> {
