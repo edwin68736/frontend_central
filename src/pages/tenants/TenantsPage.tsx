@@ -5,7 +5,7 @@ import { z } from 'zod'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { toast } from 'sonner'
 import {
-  Plus, Search, RefreshCw, Edit, Power, Layers, ChevronDown, Shield, SearchCheck, Trash2, AlertTriangle,
+  Plus, Search, RefreshCw, Edit, Power, Layers, ChevronDown, Shield, SearchCheck, Trash2, AlertTriangle, LogIn,
 } from 'lucide-react'
 import {
   tenantsService,
@@ -208,6 +208,8 @@ export default function TenantsPage() {
   const [psePasswordInput, setPsePasswordInput] = useState('')
   const [greClientSecretInput, setGreClientSecretInput] = useState('')
   const [testingConnection, setTestingConnection] = useState(false)
+  const [masterAccessTenant, setMasterAccessTenant] = useState<Tenant | null>(null)
+  const [masterAccessLoading, setMasterAccessLoading] = useState(false)
 
   const sendMode = (cfg?: { send_mode?: string }) => cfg?.send_mode ?? 'sunat_direct'
   const [syncCertBase64, setSyncCertBase64] = useState<string>('')
@@ -417,6 +419,28 @@ export default function TenantsPage() {
       fetchTenants()
     } catch {
       toast.error('Error cambiando estado')
+    }
+  }
+
+  /* ── Acceso maestro ──────────── */
+  const confirmMasterAccess = async () => {
+    if (!masterAccessTenant) return
+    setMasterAccessLoading(true)
+    try {
+      const { tenant_url, token } = await tenantsService.masterAccess(masterAccessTenant.id)
+      const base = tenant_url || resolveTenantUrl(masterAccessTenant)
+      const url = `${base.replace(/\/$/, '')}/auth/sso?token=${encodeURIComponent(token)}`
+      window.open(url, '_blank', 'noopener,noreferrer')
+      toast.success(`Acceso maestro abierto para ${masterAccessTenant.name}`)
+      setMasterAccessTenant(null)
+    } catch (err: unknown) {
+      const msg =
+        err && typeof err === 'object' && 'response' in err
+          ? (err as { response?: { data?: { error?: string } } }).response?.data?.error
+          : undefined
+      toast.error(msg || 'No se pudo generar el acceso maestro')
+    } finally {
+      setMasterAccessLoading(false)
     }
   }
 
@@ -812,6 +836,13 @@ export default function TenantsPage() {
                           className="p-1.5 rounded text-amber-600 hover:bg-amber-50 hover:text-amber-700 transition-colors"
                         >
                           <Edit size={15} />
+                        </button>
+                        <button
+                          onClick={() => setMasterAccessTenant(t)}
+                          title="Acceso maestro"
+                          className="p-1.5 rounded text-indigo-600 hover:bg-indigo-50 hover:text-indigo-700 transition-colors"
+                        >
+                          <LogIn size={15} />
                         </button>
                         <button
                           onClick={() => handleToggle(t)}
@@ -1672,6 +1703,45 @@ export default function TenantsPage() {
             </div>
           </div>
         ) : null}
+      </Modal>
+
+      {/* ── Modal: Acceso maestro ─────────────────────────── */}
+      <Modal
+        open={!!masterAccessTenant}
+        onClose={() => !masterAccessLoading && setMasterAccessTenant(null)}
+        title="Acceso maestro"
+        maxWidth="max-w-md"
+      >
+        {masterAccessTenant && (
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600 leading-relaxed">
+              Ingresarás como el administrador principal del tenant{' '}
+              <strong className="text-slate-800">{masterAccessTenant.name}</strong>.
+            </p>
+            <p className="text-sm text-slate-600 leading-relaxed">
+              Todas las acciones quedarán registradas.
+            </p>
+            <p className="text-sm font-medium text-slate-700">¿Deseas continuar?</p>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setMasterAccessTenant(null)}
+                disabled={masterAccessLoading}
+                className={btnSecondary}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={confirmMasterAccess}
+                disabled={masterAccessLoading}
+                className={btnPrimary}
+              >
+                {masterAccessLoading ? 'Generando acceso...' : 'Continuar'}
+              </button>
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   )

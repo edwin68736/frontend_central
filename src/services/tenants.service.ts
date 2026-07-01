@@ -174,6 +174,14 @@ export const tenantsService = {
     await api.patch(`/superadmin/tenants/${id}/status`, { status })
   },
 
+  /** Acceso maestro al ERP web del tenant (solo superadmin). */
+  async masterAccess(id: number): Promise<{ tenant_url: string; token: string }> {
+    const { data } = await api.post<{ tenant_url: string; token: string }>(
+      `/superadmin/tenants/${id}/master-access`,
+    )
+    return data
+  },
+
   async getModules(id: number): Promise<TenantModule[]> {
     const { data } = await api.get<{ data: TenantModule[] }>(`/superadmin/tenants/${id}/modules`)
     return data.data ?? []
