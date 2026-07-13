@@ -160,6 +160,7 @@ const createSchema = z.object({
   ruc: z.string().optional(),
   plan: z.string().min(1, 'Seleccione un plan'),
   rubro: z.enum(['general', 'gastronomico']),
+  taxpayer_regime: z.enum(['general', 'nrus']),
   admin_email: z.string().email('Email inválido'),
   admin_password: z.string().min(6, 'Mínimo 6 caracteres'),
   address: z.string().optional(),
@@ -174,6 +175,7 @@ const editSchema = z.object({
   ruc: z.string().optional(),
   plan: z.enum(['trial', 'basic', 'pro']),
   status: z.enum(['active', 'inactive', 'trial']),
+  taxpayer_regime: z.enum(['general', 'nrus']),
   address: z.string().optional(),
   ubigeo: z.string().optional(),
 })
@@ -297,7 +299,7 @@ export default function TenantsPage() {
   const [createUbigeo, setCreateUbigeo] = useState({ regionId: '', provinciaId: '', distritoId: '' })
   const createForm = useForm<CreateForm>({
     resolver: zodResolver(createSchema),
-    defaultValues: { plan: 'trial', subscription_months: 1, rubro: 'general' },
+    defaultValues: { plan: 'trial', subscription_months: 1, rubro: 'general', taxpayer_regime: 'general' },
   })
 
   const createPlanValue = createForm.watch('plan')
@@ -352,6 +354,7 @@ export default function TenantsPage() {
       ruc: t.ruc,
       plan: t.plan as EditForm['plan'],
       status: t.status as EditForm['status'],
+      taxpayer_regime: (t.taxpayer_regime as EditForm['taxpayer_regime']) ?? 'general',
       address: t.address ?? '',
       ubigeo: t.ubigeo ?? '',
     })
@@ -1020,6 +1023,15 @@ export default function TenantsPage() {
                 Gastronómico activa el módulo restaurante y crea piso, 10 mesas y empresas de delivery por defecto.
               </p>
             </FormField>
+            <FormField label="Régimen tributario *" error={createForm.formState.errors.taxpayer_regime?.message}>
+              <select {...createForm.register('taxpayer_regime')} className={inputClass}>
+                <option value="general">Régimen General / MYPE (emite Facturas y Boletas)</option>
+                <option value="nrus">Nuevo RUS (solo Boletas — no emite Facturas)</option>
+              </select>
+              <p className="text-xs text-slate-500 mt-1">
+                Nuevo RUS: la empresa solo podrá emitir Boletas y Notas de Venta; las Facturas quedan bloqueadas.
+              </p>
+            </FormField>
             <FormField label="Duración suscripción (meses)" error={createForm.formState.errors.subscription_months?.message}>
               <input
                 type="number"
@@ -1148,6 +1160,15 @@ export default function TenantsPage() {
                 <option value="active">Activo</option>
                 <option value="inactive">Suspendido</option>
               </select>
+            </FormField>
+            <FormField label="Régimen tributario *" error={editForm.formState.errors.taxpayer_regime?.message}>
+              <select {...editForm.register('taxpayer_regime')} className={inputClass}>
+                <option value="general">Régimen General / MYPE (Facturas y Boletas)</option>
+                <option value="nrus">Nuevo RUS (solo Boletas)</option>
+              </select>
+              <p className="text-xs text-slate-500 mt-1">
+                Al cambiar a Nuevo RUS, la empresa dejará de poder emitir Facturas.
+              </p>
             </FormField>
           </div>
           <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mt-2">Ubicación</p>

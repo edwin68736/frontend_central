@@ -25,6 +25,8 @@ export interface Tenant {
   plan: string
   status: string
   rubro?: string
+  /** general | nrus — régimen tributario del contribuyente (Nuevo RUS no emite facturas) */
+  taxpayer_regime?: 'general' | 'nrus'
   db_name: string
   admin_email: string
   sunat_env_mode?: string
@@ -53,6 +55,8 @@ export interface CreateTenantInput {
   admin_password: string
   /** general | gastronomico */
   rubro?: 'general' | 'gastronomico'
+  /** general | nrus — régimen tributario del contribuyente */
+  taxpayer_regime?: 'general' | 'nrus'
   /** Duración en meses de la suscripción al crear la empresa (0 = no crear suscripción). Por defecto 1. */
   subscription_months?: number
 }
@@ -66,6 +70,8 @@ export interface UpdateTenantInput {
   status: string
   address?: string
   ubigeo?: string
+  /** general | nrus — régimen tributario del contribuyente */
+  taxpayer_regime?: 'general' | 'nrus'
 }
 
 /** Catálogo de módulos del ERP por tenant (flags en tenant_modules). Opcional: nota para operadores del panel central. */
