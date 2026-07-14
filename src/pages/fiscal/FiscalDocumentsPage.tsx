@@ -42,24 +42,42 @@ const DOC_TYPES = [
   { v: 'RA', l: 'Baja' },
 ]
 
+// Grupos de estado simplificados que ve el usuario (menos estados = menos confusión).
+// El valor 'v' es el parámetro ?group= que entiende el backend.
 const STATUS_OPTS = [
   { v: '', l: 'Todos' },
-  { v: 'pending', l: 'Pendiente' },
-  { v: 'queued', l: 'En cola' },
-  { v: 'sending', l: 'Enviando' },
-  { v: 'sent', l: 'Enviado' },
+  { v: 'processing', l: 'En proceso' },
   { v: 'accepted', l: 'Aceptado' },
+  { v: 'observed', l: 'Con observaciones' },
   { v: 'rejected', l: 'Rechazado' },
-  { v: 'error', l: 'Error' },
-  { v: 'retrying', l: 'Reintentando' },
+  { v: 'action', l: 'Requiere acción' },
+  { v: 'cancelled', l: 'Anulado' },
 ]
 
-function statusVariant(s: string): 'green' | 'red' | 'yellow' | 'blue' | 'gray' {
-  if (s === 'accepted') return 'green'
-  if (s === 'rejected' || s === 'error') return 'red'
-  if (s === 'pending' || s === 'queued' || s === 'retrying') return 'yellow'
-  if (s === 'sending' || s === 'sent') return 'blue'
-  return 'gray'
+type FiscalGroup = { label: string; variant: 'green' | 'red' | 'yellow' | 'blue' | 'gray' }
+
+/**
+ * Colapsa los ~10 estados internos a 6 estados claros para el usuario:
+ * En proceso · Aceptado · Con observaciones · Rechazado · Requiere acción · Anulado.
+ */
+function fiscalGroup(status: string, errorType?: string | null): FiscalGroup {
+  switch (status) {
+    case 'accepted':
+      return { label: 'Aceptado', variant: 'green' }
+    case 'observed':
+      return { label: 'Con observaciones', variant: 'yellow' }
+    case 'rejected':
+      return { label: 'Rechazado', variant: 'red' }
+    case 'cancelled':
+      return { label: 'Anulado', variant: 'gray' }
+    case 'error':
+      // Transitorio se sigue reintentando → "En proceso". Permanente/legado → "Requiere acción".
+      return errorType === 'transient'
+        ? { label: 'En proceso', variant: 'blue' }
+        : { label: 'Requiere acción', variant: 'red' }
+    default: // pending, queued, sending, sent, retrying
+      return { label: 'En proceso', variant: 'blue' }
+  }
 }
 
 function KpiCard({
@@ -345,8 +363,8 @@ export default function FiscalDocumentsPage() {
           </select>
           <select
             className="border border-slate-200 rounded-lg px-3 py-2 text-sm"
-            value={filters.status || ''}
-            onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value || undefined }))}
+            value={filters.group || ''}
+            onChange={(e) => setFilters((f) => ({ ...f, group: e.target.value || undefined, status: undefined }))}
           >
             {STATUS_OPTS.map((o) => (
               <option key={o.v} value={o.v}>
@@ -498,7 +516,10 @@ export default function FiscalDocumentsPage() {
                     {new Date(doc.created_at).toLocaleString()}
                   </td>
                   <td className="p-3">
-                    <Badge variant={statusVariant(doc.status)}>{doc.status}</Badge>
+                    {(() => {
+                      const g = fiscalGroup(doc.status, doc.error_type)
+                      return <Badge variant={g.variant}>{g.label}</Badge>
+                    })()}
                   </td>
                   <td className="p-3">{doc.provider || doc.send_mode || '—'}</td>
                   <td className="p-3 text-right">{doc.total != null ? Number(doc.total).toFixed(2) : '—'}</td>
@@ -580,6 +601,24 @@ export default function FiscalDocumentsPage() {
               </div>
               <div>
                 <span className="text-slate-500">Tenant:</span> {detail.document.tenant_slug}
+              </div>
+              <div className="col-span-2 flex flex-wrap items-center gap-2">
+                <span className="text-slate-500">Estado:</span>
+                {(() => {
+                  const g = fiscalGroup(detail.document.status, detail.document.error_type)
+                  return <Badge variant={g.variant}>{g.label}</Badge>
+                })()}
+                {detail.document.error_type ? (
+                  <span className="text-xs text-slate-500">
+                    (
+                    {detail.document.error_type === 'transient'
+                      ? 'se reintenta automáticamente'
+                      : detail.document.error_type === 'permanent'
+                        ? 'requiere acción manual'
+                        : 'rechazo de negocio SUNAT/PSE'}
+                    {typeof detail.document.retry_count === 'number' ? ` · intentos: ${detail.document.retry_count}` : ''})
+                  </span>
+                ) : null}
               </div>
               <div className="col-span-2">
                 <span className="text-slate-500">SUNAT / PSE:</span> {detail.document.sunat_code} —{' '}

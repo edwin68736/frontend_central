@@ -281,6 +281,11 @@ export const tenantsService = {
     )
     return data.data ?? []
   },
+
+  /** Habilita/deshabilita en el facturador (Lycet) la empresa por RUC (campo enabled). */
+  async setFacturadorEnabled(ruc: string, enabled: boolean): Promise<void> {
+    await api.patch('/superadmin/tenants/facturador-enabled', { ruc, enabled })
+  },
 }
 
 export interface SunatConfigUpdate {

@@ -5,7 +5,7 @@ import { z } from 'zod'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { toast } from 'sonner'
 import {
-  Plus, Search, RefreshCw, Edit, Power, Layers, ChevronDown, Shield, SearchCheck, Trash2, AlertTriangle, LogIn,
+  Plus, Search, RefreshCw, Edit, Power, Layers, ChevronDown, Shield, SearchCheck, Trash2, AlertTriangle, LogIn, Loader2,
 } from 'lucide-react'
 import {
   tenantsService,
@@ -16,6 +16,7 @@ import {
   ALL_MODULES,
   type SunatConfigResponse,
   type SunatConfigUpdate,
+  type TenantConectadoFacturador,
 } from '@/services/tenants.service'
 import { consultaService } from '@/services/consulta.service'
 import { plansService, type SaasPlan } from '@/services/plans.service'
@@ -228,6 +229,55 @@ export default function TenantsPage() {
   const [perPage, setPerPage] = useState<PerPageOption>(25)
   const [total, setTotal] = useState(0)
   const [totalPages, setTotalPages] = useState(0)
+  // Estado "enabled" de cada empresa en el facturador (Lycet), indexado por RUC.
+  const [facturadorByRuc, setFacturadorByRuc] = useState<Record<string, TenantConectadoFacturador>>({})
+  const [togglingRuc, setTogglingRuc] = useState<string | null>(null)
+
+  const fetchFacturadorEmpresas = useCallback(async () => {
+    try {
+      const data = await tenantsService.listConectadosFacturador()
+      const map: Record<string, TenantConectadoFacturador> = {}
+      for (const e of data) {
+        if (e.ruc) map[e.ruc.trim()] = e
+      }
+      setFacturadorByRuc(map)
+    } catch {
+      setFacturadorByRuc({})
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchFacturadorEmpresas()
+  }, [fetchFacturadorEmpresas])
+
+  const handleToggleFacturador = async (t: Tenant) => {
+    const ruc = (t.ruc || '').trim()
+    if (ruc.length !== 11) {
+      toast.error('El tenant no tiene RUC válido.')
+      return
+    }
+    const entry = facturadorByRuc[ruc]
+    if (!entry) {
+      toast.error('Empresa no registrada en el facturador. Usa "SUNAT" → Sincronizar primero.')
+      return
+    }
+    const currentlyEnabled = entry.enabled !== false
+    const next = !currentlyEnabled
+    if (!next && !window.confirm(`¿Deshabilitar la empresa ${ruc} en el facturador? Dejará de poder emitir comprobantes.`)) {
+      return
+    }
+    setTogglingRuc(ruc)
+    try {
+      await tenantsService.setFacturadorEnabled(ruc, next)
+      setFacturadorByRuc((prev) => ({ ...prev, [ruc]: { ...prev[ruc], enabled: next } }))
+      toast.success(next ? 'Empresa habilitada en el facturador' : 'Empresa deshabilitada en el facturador')
+    } catch (e) {
+      const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error
+      toast.error(msg || 'No se pudo cambiar el estado en el facturador.')
+    } finally {
+      setTogglingRuc(null)
+    }
+  }
 
   const fetchTenants = useCallback(async () => {
     setLoading(true)
@@ -811,7 +861,7 @@ export default function TenantsPage() {
                 <table className="w-full text-sm">
               <thead className="bg-slate-50 border-y border-slate-100">
                 <tr>
-                  {['Empresa', 'Slug', 'Rubro', 'Email', 'RUC', 'Plan', 'Modo SUNAT', 'Estado', 'Acciones'].map((h) => (
+                  {['Empresa', 'Slug', 'Rubro', 'Email', 'RUC', 'Plan', 'Modo SUNAT', 'Facturador', 'Estado', 'Acciones'].map((h) => (
                     <th
                       key={h}
                       className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide"
@@ -855,6 +905,30 @@ export default function TenantsPage() {
                     </td>
                     <td className="px-4 py-3">
                       <SunatEnvCell tenant={t} onUpdated={() => fetchTenants()} />
+                    </td>
+                    <td className="px-4 py-3">
+                      {(() => {
+                        const ruc = (t.ruc || '').trim()
+                        const entry = ruc ? facturadorByRuc[ruc] : undefined
+                        if (!entry) {
+                          return <span className="text-slate-400 text-xs">No registrada</span>
+                        }
+                        const enabled = entry.enabled !== false
+                        return (
+                          <button
+                            type="button"
+                            disabled={togglingRuc === ruc}
+                            onClick={() => handleToggleFacturador(t)}
+                            title={enabled ? 'Habilitada en el facturador — clic para deshabilitar' : 'Deshabilitada en el facturador — clic para habilitar'}
+                            className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors disabled:opacity-50 ${
+                              enabled ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-red-100 text-red-700 hover:bg-red-200'
+                            }`}
+                          >
+                            {togglingRuc === ruc ? <Loader2 size={13} className="animate-spin" /> : <Power size={13} />}
+                            {enabled ? 'Habilitada' : 'Deshabilitada'}
+                          </button>
+                        )
+                      })()}
                     </td>
                     <td className="px-4 py-3">
                       <Badge variant={statusVariant(t.status)}>{statusLabel(t.status)}</Badge>
@@ -1409,6 +1483,40 @@ export default function TenantsPage() {
                 </>
               ) : null}
             </div>
+            {(() => {
+              const ruc = (sunatTenant.config.ruc || sunatTenant.tenant.ruc || '').trim()
+              const entry = ruc ? facturadorByRuc[ruc] : undefined
+              const enabled = entry ? entry.enabled !== false : null
+              return (
+                <div className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2.5">
+                  <div className="min-w-0 pr-3">
+                    <p className="text-sm font-medium text-slate-700">Habilitado en facturador (Lycet)</p>
+                    <p className="text-xs text-slate-500">
+                      {entry
+                        ? enabled
+                          ? 'La empresa puede emitir a SUNAT/PSE.'
+                          : 'Deshabilitada: los envíos se rechazan como "Empresa fiscal deshabilitada". Habilítala para emitir.'
+                        : 'La empresa aún no está registrada en el facturador. Usa "Sincronizar con facturador".'}
+                    </p>
+                  </div>
+                  {entry ? (
+                    <button
+                      type="button"
+                      disabled={togglingRuc === ruc}
+                      onClick={() => handleToggleFacturador(sunatTenant.tenant)}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors disabled:opacity-50 flex-shrink-0 ${
+                        enabled ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-red-100 text-red-700 hover:bg-red-200'
+                      }`}
+                    >
+                      {togglingRuc === ruc ? <Loader2 size={13} className="animate-spin" /> : <Power size={13} />}
+                      {enabled ? 'Habilitada' : 'Deshabilitada'}
+                    </button>
+                  ) : (
+                    <Badge variant="gray">No registrada</Badge>
+                  )}
+                </div>
+              )
+            })()}
             {(sunatTenant.config.certificate_file || sunatTenant.config.logo_file) && sunatForm.send_mode !== 'pse' ? (
               <div className="text-xs text-slate-600 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2 space-y-1">
                 {sunatTenant.config.certificate_file ? (

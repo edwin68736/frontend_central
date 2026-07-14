@@ -36,6 +36,9 @@ export interface FiscalDocumentSummary {
   customer_email: string | null
   email_status: string | null
   retry_count: number
+  /** transient | permanent | business | null — desambigua el estado "error". */
+  error_type?: string | null
+  retryable?: boolean
   created_at: string
   accepted_at: string | null
 }
@@ -68,6 +71,8 @@ export interface FiscalFilters {
   to?: string
   document_type?: string
   status?: string
+  /** Grupo de estado simplificado: processing | accepted | observed | rejected | action | cancelled. */
+  group?: string
   send_mode?: string
   provider?: string
   series?: string

@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Building2, Edit, RefreshCw, Search } from 'lucide-react'
+import { Building2, Edit, Loader2, Power, RefreshCw, Search } from 'lucide-react'
 import { tenantsService, type TenantConectadoFacturador } from '@/services/tenants.service'
 import { resolveTenantUrl } from '@/utils/tenantUrl'
 import { Card, CardHeader, CardBody } from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
 import Spinner from '@/components/ui/Spinner'
+import PaginationBar from '@/components/ui/PaginationBar'
+import type { PerPageOption } from '@/services/pagination'
 
 function formatDate(s: string | null): string {
   if (!s) return '—'
@@ -22,6 +24,10 @@ export default function EmpresasFacturadorPage() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [conexionFilter, setConexionFilter] = useState('')
+  const [enabledFilter, setEnabledFilter] = useState('')
+  const [page, setPage] = useState(1)
+  const [perPage, setPerPage] = useState<PerPageOption>(25)
+  const [togglingRuc, setTogglingRuc] = useState<string | null>(null)
 
   const fetchList = async () => {
     setLoading(true)
@@ -43,6 +49,8 @@ export default function EmpresasFacturadorPage() {
     const q = search.trim().toLowerCase()
     return list.filter((t) => {
       if (conexionFilter && t.conexion_tipo !== conexionFilter) return false
+      if (enabledFilter === 'enabled' && t.enabled === false) return false
+      if (enabledFilter === 'disabled' && t.enabled !== false) return false
       if (!q) return true
       return (
         t.ruc.toLowerCase().includes(q) ||
@@ -50,10 +58,44 @@ export default function EmpresasFacturadorPage() {
         (t.slug || '').toLowerCase().includes(q)
       )
     })
-  }, [list, search, conexionFilter])
+  }, [list, search, conexionFilter, enabledFilter])
+
+  // Reiniciar a la primera página cuando cambian filtros/búsqueda o el tamaño de página.
+  useEffect(() => {
+    setPage(1)
+  }, [search, conexionFilter, enabledFilter, perPage])
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / perPage))
+  const paged = useMemo(
+    () => filtered.slice((page - 1) * perPage, page * perPage),
+    [filtered, page, perPage],
+  )
 
   const handleEditar = (t: TenantConectadoFacturador) => {
     navigate('/tenants', { state: { openSunatId: t.id } })
+  }
+
+  const handleToggleEnabled = async (t: TenantConectadoFacturador) => {
+    const ruc = (t.ruc || '').trim()
+    if (ruc.length !== 11) {
+      window.alert('RUC inválido: no se puede cambiar el estado en el facturador.')
+      return
+    }
+    const currentlyEnabled = t.enabled !== false
+    const next = !currentlyEnabled
+    if (!next && !window.confirm(`¿Deshabilitar la empresa ${ruc} en el facturador? Dejará de poder emitir comprobantes.`)) {
+      return
+    }
+    setTogglingRuc(ruc)
+    try {
+      await tenantsService.setFacturadorEnabled(ruc, next)
+      setList((prev) => prev.map((row) => (row.ruc === ruc ? { ...row, enabled: next } : row)))
+    } catch (e) {
+      const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error
+      window.alert(msg || 'No se pudo cambiar el estado en el facturador.')
+    } finally {
+      setTogglingRuc(null)
+    }
   }
 
   return (
@@ -85,6 +127,15 @@ export default function EmpresasFacturadorPage() {
             <option value="">Conexión (todas)</option>
             <option value="SUNAT">SUNAT directo</option>
             <option value="PSE">PSE</option>
+          </select>
+          <select
+            value={enabledFilter}
+            onChange={(e) => setEnabledFilter(e.target.value)}
+            className="px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white"
+          >
+            <option value="">Estado (todos)</option>
+            <option value="enabled">Habilitadas</option>
+            <option value="disabled">Deshabilitadas</option>
           </select>
         </CardBody>
       </Card>
@@ -126,6 +177,7 @@ export default function EmpresasFacturadorPage() {
             </div>
           </CardBody>
         ) : (
+          <>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-slate-50 border-y border-slate-100">
@@ -137,7 +189,8 @@ export default function EmpresasFacturadorPage() {
                     'Conexión',
                     'Provider',
                     'Ambiente',
-                    'Estado',
+                    'Habilitado (facturador)',
+                    'Conexión SUNAT',
                     'Última sync',
                     'Acciones',
                   ].map((h) => (
@@ -151,7 +204,7 @@ export default function EmpresasFacturadorPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
-                {filtered.map((t) => (
+                {paged.map((t) => (
                   <tr key={t.ruc || t.id} className="hover:bg-slate-50/50 transition-colors">
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
@@ -204,14 +257,36 @@ export default function EmpresasFacturadorPage() {
                       )}
                     </td>
                     <td className="px-4 py-3">
+                      <button
+                        type="button"
+                        disabled={togglingRuc === t.ruc || (t.ruc || '').trim().length !== 11}
+                        onClick={() => handleToggleEnabled(t)}
+                        title={
+                          t.enabled !== false
+                            ? 'Habilitada en el facturador — clic para deshabilitar'
+                            : 'Deshabilitada en el facturador — clic para habilitar'
+                        }
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                          t.enabled !== false
+                            ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                            : 'bg-red-100 text-red-700 hover:bg-red-200'
+                        }`}
+                      >
+                        {togglingRuc === t.ruc ? (
+                          <Loader2 size={13} className="animate-spin" />
+                        ) : (
+                          <Power size={13} />
+                        )}
+                        {t.enabled !== false ? 'Habilitada' : 'Deshabilitada'}
+                      </button>
+                    </td>
+                    <td className="px-4 py-3">
                       {t.connection_status ? (
                         <Badge variant={t.connection_status === 'connected' ? 'green' : 'yellow'}>
                           {t.connection_status}
                         </Badge>
                       ) : (
-                        <Badge variant={t.enabled !== false ? 'green' : 'red'}>
-                          {t.enabled !== false ? 'Activa' : 'Inactiva'}
-                        </Badge>
+                        <span className="text-slate-400 text-xs">—</span>
                       )}
                     </td>
                     <td className="px-4 py-3 text-slate-500 text-xs">{formatDate(t.sunat_connected_at)}</td>
@@ -240,6 +315,16 @@ export default function EmpresasFacturadorPage() {
               </tbody>
             </table>
           </div>
+          <PaginationBar
+            page={page}
+            perPage={perPage}
+            total={filtered.length}
+            totalPages={totalPages}
+            onPageChange={setPage}
+            onPerPageChange={setPerPage}
+            itemLabel="empresa(s)"
+          />
+          </>
         )}
       </Card>
     </div>
