@@ -1691,6 +1691,35 @@ export default function TenantsPage() {
                   </FormField>
                 </>
               ) : null}
+              {sunatForm.send_mode === 'pse' ? (
+                <>
+                  <div className="col-span-full bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 text-xs text-amber-800">
+                    Credenciales SOL <span className="font-medium">opcionales</span>: habilitan validar el
+                    comprobante directamente en SUNAT cuando el PSE no responde. No reemplazan las credenciales del PSE.
+                  </div>
+                  <FormField label="Usuario SOL (opcional)">
+                    <input
+                      value={sunatForm.sunat_sol_user ?? ''}
+                      onChange={(e) => setSunatForm((f) => ({ ...f, sunat_sol_user: e.target.value }))}
+                      placeholder={sunatTenant.config.ruc ? `${sunatTenant.config.ruc}MODDATOS` : 'RUCMODDATOS'}
+                      className={inputClass}
+                    />
+                  </FormField>
+                  <FormField label="Clave SOL (opcional)">
+                    <input
+                      type="password"
+                      value={sunatForm.sunat_sol_pass ?? ''}
+                      onChange={(e) => setSunatForm((f) => ({ ...f, sunat_sol_pass: e.target.value }))}
+                      placeholder={
+                        sunatTenant.config.sol_configured
+                          ? 'Configurado en facturador (vacío = no cambiar)'
+                          : 'Solo si desea validar en SUNAT'
+                      }
+                      className={inputClass}
+                    />
+                  </FormField>
+                </>
+              ) : null}
               <FormField label="Tasa IGV (%)">
                 <input
                   type="number"
