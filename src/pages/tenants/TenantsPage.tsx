@@ -27,6 +27,7 @@ import { UbigeoSelects, ubigeoToIds } from '@/components/UbigeoSelects'
 import { Card, CardHeader, CardBody } from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
 import Modal from '@/components/ui/Modal'
+import ActionMenu from '@/components/ui/ActionMenu'
 import Spinner from '@/components/ui/Spinner'
 import PaginationBar from '@/components/ui/PaginationBar'
 import type { PerPageOption } from '@/services/pagination'
@@ -934,51 +935,49 @@ export default function TenantsPage() {
                       <Badge variant={statusVariant(t.status)}>{statusLabel(t.status)}</Badge>
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => openEdit(t)}
-                          title="Editar"
-                          className="p-1.5 rounded text-amber-600 hover:bg-amber-50 hover:text-amber-700 transition-colors"
-                        >
-                          <Edit size={15} />
-                        </button>
-                        <button
-                          onClick={() => setMasterAccessTenant(t)}
-                          title="Acceso maestro"
-                          className="p-1.5 rounded text-indigo-600 hover:bg-indigo-50 hover:text-indigo-700 transition-colors"
-                        >
-                          <LogIn size={15} />
-                        </button>
-                        <button
-                          onClick={() => handleToggle(t)}
-                          title={t.status === 'active' ? 'Suspender' : 'Activar'}
-                          className={`p-1.5 rounded transition-colors ${
-                            t.status === 'active'
-                              ? 'text-red-500 hover:bg-red-50 hover:text-red-600'
-                              : 'text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700'
-                          }`}
-                        >
-                          <Power size={15} />
-                        </button>
-                        <button
-                          onClick={() => openModules(t)}
-                          title="Módulos"
-                          className="p-1.5 rounded text-violet-600 hover:bg-violet-50 hover:text-violet-700 transition-colors disabled:opacity-50"
-                          disabled={loadingModules}
-                        >
-                          <Layers size={15} />
-                        </button>
-                        {t.billing_enabled && (
-                          <button
-                            onClick={() => openSunat(t)}
-                            title="SUNAT / Facturador"
-                            className="p-1.5 rounded text-sky-600 hover:bg-sky-50 hover:text-sky-700 transition-colors disabled:opacity-50"
-                            disabled={loadingSunat}
-                          >
-                            <Shield size={15} />
-                          </button>
-                        )}
-                      </div>
+                      <ActionMenu
+                        items={[
+                          {
+                            key: 'edit',
+                            label: 'Editar',
+                            icon: <Edit size={15} className="text-amber-600" />,
+                            onClick: () => openEdit(t),
+                          },
+                          {
+                            key: 'master',
+                            label: 'Acceso maestro',
+                            icon: <LogIn size={15} className="text-indigo-600" />,
+                            onClick: () => setMasterAccessTenant(t),
+                          },
+                          {
+                            key: 'toggle',
+                            label: t.status === 'active' ? 'Suspender' : 'Activar',
+                            icon: (
+                              <Power
+                                size={15}
+                                className={t.status === 'active' ? 'text-red-500' : 'text-emerald-600'}
+                              />
+                            ),
+                            onClick: () => handleToggle(t),
+                            tone: t.status === 'active' ? 'danger' : 'success',
+                          },
+                          {
+                            key: 'modules',
+                            label: 'Módulos',
+                            icon: <Layers size={15} className="text-violet-600" />,
+                            onClick: () => openModules(t),
+                            disabled: loadingModules,
+                          },
+                          {
+                            key: 'sunat',
+                            label: 'SUNAT / Facturador',
+                            icon: <Shield size={15} className="text-sky-600" />,
+                            onClick: () => openSunat(t),
+                            disabled: loadingSunat,
+                            hidden: !t.billing_enabled,
+                          },
+                        ]}
+                      />
                     </td>
                   </tr>
                 ))}
