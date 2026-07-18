@@ -14,8 +14,10 @@ export type ActionMenuItem = {
 
 /**
  * Menú de acciones en dropdown (kebab). Cada ítem muestra su ícono + label.
- * Se renderiza en un portal con posición fija para no ser recortado por
- * contenedores con overflow (p. ej. tablas con overflow-x-auto).
+ * Se renderiza en un portal con posición fija (no lo recorta el overflow de la tabla)
+ * y se abre hacia arriba automáticamente cuando no hay espacio suficiente abajo
+ * (p. ej. en la última fila de la lista). El posicionamiento se aplica por ref para
+ * evitar renders extra y medir la altura real del menú.
  */
 export default function ActionMenu({
   items,
@@ -25,22 +27,30 @@ export default function ActionMenu({
   ariaLabel?: string
 }) {
   const [open, setOpen] = useState(false)
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const visible = items.filter((i) => !i.hidden)
   const MENU_WIDTH = 224
+  const MARGIN = 8
 
-  const place = () => {
-    const el = btnRef.current
-    if (!el) return
-    const r = el.getBoundingClientRect()
-    const left = Math.max(8, Math.min(r.right - MENU_WIDTH, window.innerWidth - MENU_WIDTH - 8))
-    setPos({ top: r.bottom + 4, left })
-  }
-
+  // Mide la altura real del menú ya renderizado y decide abajo/arriba; aplica estilos por ref.
   useLayoutEffect(() => {
-    if (open) place()
+    if (!open) return
+    const btn = btnRef.current
+    const menu = menuRef.current
+    if (!btn || !menu) return
+    const r = btn.getBoundingClientRect()
+    const menuH = menu.offsetHeight
+    const left = Math.max(MARGIN, Math.min(r.right - MENU_WIDTH, window.innerWidth - MENU_WIDTH - MARGIN))
+    const spaceBelow = window.innerHeight - r.bottom
+    let top = r.bottom + 4
+    // Sin espacio abajo y con más espacio arriba → abrir hacia arriba (última fila).
+    if (spaceBelow < menuH + MARGIN && r.top > spaceBelow) {
+      top = Math.max(MARGIN, r.top - menuH - 4)
+    }
+    menu.style.top = `${top}px`
+    menu.style.left = `${left}px`
+    menu.style.visibility = 'visible'
   }, [open])
 
   useEffect(() => {
@@ -81,13 +91,14 @@ export default function ActionMenu({
       >
         <MoreVertical size={16} />
       </button>
-      {open && pos
+      {open
         ? createPortal(
             <div
               ref={menuRef}
               role="menu"
-              style={{ position: 'fixed', top: pos.top, left: pos.left, width: MENU_WIDTH }}
-              className="z-50 origin-top-right rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
+              // Inicia oculto fuera de pantalla; el layout effect lo posiciona y lo hace visible.
+              style={{ position: 'fixed', top: -9999, left: 0, width: MENU_WIDTH, visibility: 'hidden' }}
+              className="z-50 origin-top rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
             >
               {visible.map((item) => (
                 <button
