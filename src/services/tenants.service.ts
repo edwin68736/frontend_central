@@ -22,7 +22,14 @@ export interface Tenant {
   ruc: string
   address: string
   ubigeo: string
+  /** Nombre del plan guardado en el tenant (texto). Para identificarlo use `plan_id`. */
   plan: string
+  /**
+   * Plan resuelto contra el catálogo SaaS, priorizando la suscripción vigente (fuente de
+   * verdad). 0 o ausente = el plan guardado no existe en el catálogo (dato heredado).
+   */
+  plan_id?: number
+  plan_name?: string
   status: string
   rubro?: string
   /** general | nrus — régimen tributario del contribuyente (Nuevo RUS no emite facturas) */

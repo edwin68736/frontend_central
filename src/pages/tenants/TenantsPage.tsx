@@ -175,12 +175,32 @@ const editSchema = z.object({
   email: z.string().email(),
   phone: z.string().optional(),
   ruc: z.string().optional(),
-  plan: z.enum(['trial', 'basic', 'pro']),
+  // Abierto como en createSchema: el catálogo de planes lo define el superadmin en /plans,
+  // no puede estar clavado a trial/basic/pro.
+  plan: z.string().min(1, 'Seleccione un plan'),
   status: z.enum(['active', 'inactive', 'trial']),
   taxpayer_regime: z.enum(['general', 'nrus']),
   address: z.string().optional(),
   ubigeo: z.string().optional(),
 })
+
+/**
+ * Valor que debe quedar seleccionado en el `<select>` de plan para un tenant.
+ *
+ * Se resuelve contra el catálogo (primero por `plan_id`, que viene de la suscripción
+ * vigente; si no, por nombre sin distinguir mayúsculas) y se devuelve el nombre canónico
+ * del plan. Si no hay coincidencia devuelve '' para que el select quede vacío en lugar de
+ * caer al primer option: antes eso mostraba "Trial" y al guardar pisaba el plan real.
+ */
+function resolveTenantPlanValue(t: Tenant, plans: SaasPlan[]): string {
+  if (t.plan_id) {
+    const byId = plans.find(p => p.id === t.plan_id)
+    if (byId) return byId.name
+  }
+  const raw = String(t.plan_name ?? t.plan ?? '').trim().toLowerCase()
+  if (!raw) return ''
+  return plans.find(p => p.name.trim().toLowerCase() === raw)?.name ?? ''
+}
 
 type CreateForm = z.infer<typeof createSchema>
 type EditForm = z.infer<typeof editSchema>
@@ -226,6 +246,8 @@ export default function TenantsPage() {
   const [syncLogoBase64, setSyncLogoBase64] = useState<string>('')
   const [consultandoRuc, setConsultandoRuc] = useState<'create' | 'edit' | null>(null)
   const [saasPlans, setSaasPlans] = useState<SaasPlan[]>([])
+  /** ¿El plan del tenant en edición existe en el catálogo? Si no, se pide elegir uno. */
+  const editPlanMatched = Boolean(editTenant && resolveTenantPlanValue(editTenant, saasPlans))
   const [page, setPage] = useState(1)
   const [perPage, setPerPage] = useState<PerPageOption>(25)
   const [total, setTotal] = useState(0)
@@ -318,6 +340,7 @@ export default function TenantsPage() {
       .then(plans => setSaasPlans(plans.filter(p => p.active)))
       .catch(() => {})
   }, [])
+
   useEffect(() => {
     if (!regionFilter) {
       setProvinciasFilter([])
@@ -393,6 +416,14 @@ export default function TenantsPage() {
 
   /* ── Edit form ───────────────── */
   const editForm = useForm<EditForm>({ resolver: zodResolver(editSchema) })
+
+  // El catálogo se carga async: si el modal de edición se abrió antes de que llegara, la
+  // preselección se recalcula aquí en lugar de quedarse vacía.
+  useEffect(() => {
+    if (!editTenant || saasPlans.length === 0) return
+    const value = resolveTenantPlanValue(editTenant, saasPlans)
+    if (value) editForm.setValue('plan', value)
+  }, [saasPlans, editTenant, editForm])
   const [editUbigeo, setEditUbigeo] = useState({ regionId: '', provinciaId: '', distritoId: '' })
 
   const openEdit = (t: Tenant) => {
@@ -403,7 +434,7 @@ export default function TenantsPage() {
       email: t.email,
       phone: t.phone,
       ruc: t.ruc,
-      plan: t.plan as EditForm['plan'],
+      plan: resolveTenantPlanValue(t, saasPlans),
       status: t.status as EditForm['status'],
       taxpayer_regime: (t.taxpayer_regime as EditForm['taxpayer_regime']) ?? 'general',
       address: t.address ?? '',
@@ -902,7 +933,9 @@ export default function TenantsPage() {
                     <td className="px-4 py-3 text-slate-600">{t.email}</td>
                     <td className="px-4 py-3 text-slate-600">{t.ruc || '—'}</td>
                     <td className="px-4 py-3">
-                      <Badge variant="blue">{t.plan}</Badge>
+                      {/* plan_name viene resuelto de la suscripción vigente; t.plan es el
+                          texto suelto y solo sirve de respaldo. */}
+                      <Badge variant="blue">{t.plan_name || t.plan}</Badge>
                     </td>
                     <td className="px-4 py-3">
                       <SunatEnvCell tenant={t} onUpdated={() => fetchTenants()} />
@@ -1223,10 +1256,21 @@ export default function TenantsPage() {
             </FormField>
             <FormField label="Plan *" error={editForm.formState.errors.plan?.message}>
               <select {...editForm.register('plan')} className={inputClass}>
-                <option value="trial">Trial</option>
-                <option value="basic">Basic</option>
-                <option value="pro">Pro</option>
+                {/* Vacío solo si el plan guardado no está en el catálogo: obliga a elegir
+                    uno válido en vez de guardar en silencio el primero de la lista. */}
+                {!editPlanMatched && <option value="">— Seleccione un plan —</option>}
+                {saasPlans.map(p => (
+                  <option key={p.id} value={p.name}>
+                    {p.name} — S/ {p.price.toFixed(2)} /{' '}
+                    {p.billing_cycle === 'yearly' ? 'año' : p.billing_cycle === 'lifetime' ? 'vitalicio' : 'mes'}
+                  </option>
+                ))}
               </select>
+              {!editPlanMatched && editTenant && (
+                <p className="mt-1 text-xs text-amber-600">
+                  El plan guardado ({editTenant.plan || 'sin plan'}) no existe en el catálogo. Seleccione uno.
+                </p>
+              )}
             </FormField>
             <FormField label="Estado *" error={editForm.formState.errors.status?.message}>
               <select {...editForm.register('status')} className={inputClass}>

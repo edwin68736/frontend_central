@@ -10,9 +10,17 @@ export interface SaasPayment {
   currency: string
   period_months: number
   receipt_url: string
-  status: 'pending' | 'approved' | 'rejected'
+  /**
+   * pending_review = enviado por el tenant (espera validación).
+   * pending = registrado por un admin desde este panel.
+   * Ambos requieren aprobación; omitir pending_review de esta unión fue lo que impidió
+   * que el compilador detectara que los botones de aprobar/rechazar no se renderizaban.
+   */
+  status: 'pending' | 'pending_review' | 'approved' | 'rejected'
   notes: string
   admin_notes: string
+  /** Boleta/factura emitida al cliente por este pago (PDF). */
+  fiscal_doc_url?: string
   reviewed_by: number | null
   reviewed_at: string | null
   created_at: string
@@ -45,5 +53,15 @@ export const paymentsService = {
 
   async reject(id: number, adminNotes: string): Promise<void> {
     await api.patch(`/superadmin/payments/${id}/reject`, { admin_notes: adminNotes })
+  },
+
+  /** Adjunta la boleta/factura (PDF) que se le emite al cliente por este pago. */
+  async uploadFiscalDoc(id: number, file: File): Promise<string> {
+    const fd = new FormData()
+    fd.append('document', file)
+    const r = await api.post(`/superadmin/payments/${id}/fiscal-document`, fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    return r.data.fiscal_doc_url
   },
 }
