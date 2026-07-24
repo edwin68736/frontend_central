@@ -14,6 +14,7 @@ import Badge from '@/components/ui/Badge'
 import Spinner from '@/components/ui/Spinner'
 import Modal from '@/components/ui/Modal'
 import { getTenantUrl } from '@/utils/tenantUrl'
+import { BackfillsPanel } from './BackfillsPanel'
 import {
   RefreshCw,
   Play,
@@ -582,6 +583,8 @@ export default function FleetMigrationsPage() {
           </div>
         )}
       </Modal>
+
+      <BackfillsPanel />
 
       <Modal open={!!confirm} onClose={() => setConfirm(null)} title={confirm?.title || ''}>
         <p className="text-slate-600 mb-4">{confirm?.message}</p>
