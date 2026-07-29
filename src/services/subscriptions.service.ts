@@ -9,7 +9,10 @@ export interface SaasSubscription {
   plan_name: string
   start_date: string
   end_date: string
-  status: 'active' | 'expired' | 'suspended' | 'trial'
+  status: 'active' | 'expired' | 'suspended' | 'trial' | 'grace_period' | 'overdue' | 'provisional' | 'provisional_active' | 'cancelled'
+  status_label?: string // traducción al español: "Vigente", "Mora", etc.
+  days_overdue?: number // días de mora (0 si vigente)
+  days_in_grace?: number // días restantes de gracia (0 si fuera de gracia)
   notes: string
   modules: string[]
   created_at: string
