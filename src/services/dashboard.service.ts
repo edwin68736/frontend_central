@@ -4,9 +4,8 @@ export interface SAStats {
   total: number
   active: number
   inactive: number
-  trial: number
-  basic: number
-  pro: number
+  /** Conteo por plan real de la suscripción vigente: claves "plan_<nombre>" (dinámicas). */
+  [key: string]: number
 }
 
 export interface RecentTenant {

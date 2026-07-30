@@ -47,6 +47,8 @@ export interface TenantModule {
   tenant_id: number
   module_key: string
   enabled: boolean
+  /** 'plan' = heredado del plan (se recalcula al reconciliar) | 'manual' = cortesía del superadmin. */
+  source?: 'plan' | 'manual'
 }
 
 export interface CreateTenantInput {
@@ -81,43 +83,20 @@ export interface UpdateTenantInput {
   taxpayer_regime?: 'general' | 'nrus'
 }
 
-/** Catálogo de módulos del ERP por tenant (flags en tenant_modules). Opcional: nota para operadores del panel central. */
-export interface ModuleCatalogItem {
-  key: string
-  name: string
-  icon: string
-  /** Texto breve bajo el nombre en el modal de módulos (evitar confusiones con el plan Tukifac–tenant). */
-  centralNote?: string
+/**
+ * Emoji cosmético por módulo para el panel central. NO es un catálogo de módulos (la lista real
+ * viene del backend `/superadmin/saas-modules`); es solo decoración con fallback para keys nuevas.
+ */
+const MODULE_EMOJI: Record<string, string> = {
+  sales: '🛒', purchases: '🚚', inventory: '📦', cashbank: '🏦', contacts: '📋',
+  products: '🏷️', billing: '🧾', restaurant: '🍽️', ecommerce: '🛍️', hotel: '🏨',
+  clinic: '⚕️', transport: '🚛', manufacturing: '🏭', memberships: '💳', hr: '👥',
+  accounting: '📒', bi: '📊', fixedassets: '📚', documents: '📁', support: '🎫',
 }
 
-export const ALL_MODULES: ModuleCatalogItem[] = [
-  { key: 'sales', name: 'Ventas / POS', icon: '🛒' },
-  { key: 'purchases', name: 'Compras', icon: '🚚' },
-  { key: 'inventory', name: 'Inventario', icon: '📦' },
-  { key: 'cashbank', name: 'Caja y Bancos', icon: '🏦' },
-  { key: 'contacts', name: 'Clientes y Proveedores', icon: '📋' },
-  { key: 'products', name: 'Productos', icon: '🏷️' },
-  { key: 'billing', name: 'Facturación Electrónica', icon: '🧾' },
-  { key: 'restaurant', name: 'Restaurante', icon: '🍽️' },
-  { key: 'ecommerce', name: 'Ecommerce', icon: '🛍️' },
-  { key: 'hotel', name: 'Hotel', icon: '🏨' },
-  { key: 'clinic', name: 'Clínica / Consultorio', icon: '⚕️' },
-  { key: 'transport', name: 'Transporte / logística', icon: '🚛' },
-  { key: 'manufacturing', name: 'Producción / manufactura', icon: '🏭' },
-  {
-    key: 'memberships',
-    name: 'Cuotas y membresías (clientes del tenant)',
-    icon: '💳',
-    centralNote:
-      'Funcionalidad dentro del ERP para socios, alumnos, mensualidades, etc. No es el contrato del tenant con Tukifac (eso es el plan y Suscripciones/Pagos en este panel).',
-  },
-  { key: 'hr', name: 'Recursos Humanos (HR)', icon: '👥' },
-  { key: 'accounting', name: 'Contabilidad', icon: '📒' },
-  { key: 'bi', name: 'Business Intelligence', icon: '📊' },
-  { key: 'fixedassets', name: 'Activos fijos', icon: '📚' },
-  { key: 'documents', name: 'Documentos', icon: '📁' },
-  { key: 'support', name: 'Soporte / Tickets', icon: '🎫' },
-]
+export function moduleEmoji(key: string): string {
+  return MODULE_EMOJI[key] ?? '🧩'
+}
 
 export interface TenantConectadoFacturador {
   id: number
