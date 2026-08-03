@@ -138,7 +138,7 @@ export default function PlansPage() {
             </div>
             <p className="text-xs text-gray-400">
               Docs electrónicos:{' '}
-              {plan.is_unlimited_documents ? 'Ilimitados' : `${plan.monthly_documents_limit ?? 0} / ciclo`}
+              {plan.is_unlimited_documents ? 'Ilimitados' : `${plan.monthly_documents_limit ?? 0} / mes`}
             </p>
 
             <div className="flex flex-wrap gap-1">
@@ -230,7 +230,9 @@ export default function PlansPage() {
             </label>
             {!form.is_unlimited_documents && (
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Límite por ciclo</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Límite mensual de documentos
+                </label>
                 <input
                   type="number"
                   min={0}
@@ -238,6 +240,10 @@ export default function PlansPage() {
                   value={form.monthly_documents_limit ?? 0}
                   onChange={e => setForm(f => ({ ...f, monthly_documents_limit: parseInt(e.target.value, 10) || 0 }))}
                 />
+                <p className="mt-1 text-xs text-slate-500">
+                  Se renueva cada mes, aunque el cliente pague varios meses por adelantado.
+                  Un plan semestral con 200 da 200 documentos en cada uno de los 6 meses.
+                </p>
               </div>
             )}
           </div>
