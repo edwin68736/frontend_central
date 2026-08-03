@@ -6,6 +6,13 @@ export interface SaasModule {
   name: string
   description: string
   icon: string
+  category: string
+  /** El módulo existe en código y es usable. Los no implementados NO se muestran al tenant,
+   *  pero el superadmin sí los ve para pre-asignarlos a un plan. */
+  implemented: boolean
+  /** Keys de módulos de los que depende (CSV). Ej. "cashbank" para sales. */
+  requires: string
+  sort_order: number
   active: boolean
 }
 
@@ -19,6 +26,10 @@ export interface SaasPlan {
   modules: string[]
   is_unlimited_documents?: boolean
   monthly_documents_limit?: number
+  /** Cuotas del plan (0 = ilimitado). */
+  max_users?: number
+  max_branches?: number
+  max_products?: number
   created_at: string
 }
 
@@ -30,12 +41,49 @@ export interface CreatePlanInput {
   modules: string[]
   is_unlimited_documents?: boolean
   monthly_documents_limit?: number
+  max_users?: number
+  max_branches?: number
+  max_products?: number
+}
+
+export interface ModuleInput {
+  key: string
+  name: string
+  description: string
+  icon: string
+  category: string
+  sort_order: number
+}
+
+/** Separa el CSV `requires` en keys. */
+export function moduleRequires(m: Pick<SaasModule, 'requires'>): string[] {
+  return (m.requires ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
 }
 
 export const plansService = {
   async listModules(): Promise<SaasModule[]> {
     const r = await api.get('/superadmin/saas-modules')
     return r.data.data ?? []
+  },
+
+  async createModule(input: ModuleInput): Promise<SaasModule> {
+    const r = await api.post('/superadmin/saas-modules', input)
+    return r.data.data
+  },
+
+  async updateModule(id: number, input: ModuleInput): Promise<void> {
+    await api.put(`/superadmin/saas-modules/${id}`, input)
+  },
+
+  async toggleModule(id: number): Promise<void> {
+    await api.patch(`/superadmin/saas-modules/${id}/toggle`)
+  },
+
+  async deleteModule(id: number): Promise<void> {
+    await api.delete(`/superadmin/saas-modules/${id}`)
   },
 
   async list(): Promise<SaasPlan[]> {

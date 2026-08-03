@@ -13,13 +13,14 @@ import {
   TenantModule,
   CreateTenantInput,
   UpdateTenantInput,
-  ALL_MODULES,
+  moduleEmoji,
   type SunatConfigResponse,
   type SunatConfigUpdate,
   type TenantConectadoFacturador,
 } from '@/services/tenants.service'
 import { consultaService } from '@/services/consulta.service'
-import { plansService, type SaasPlan } from '@/services/plans.service'
+import { plansService, type SaasPlan, type SaasModule } from '@/services/plans.service'
+import { subscriptionsService, type SaasSubscription } from '@/services/subscriptions.service'
 import { getRootDomain, getTenantHost, resolveTenantUrl, buildMasterAccessUrl } from '@/utils/tenantUrl'
 import { fileToBase64Binary, fileToBase64Text } from '@/utils/fileBase64'
 import { ubigeoService } from '@/services/ubigeo.service'
@@ -37,6 +38,41 @@ const statusVariant = (s: string) =>
   s === 'active' ? 'green' : s === 'inactive' ? 'red' : 'yellow'
 const statusLabel = (s: string) =>
   s === 'active' ? 'Activo' : s === 'inactive' ? 'Suspendido' : s
+
+const subscriptionStatusVariant = (status?: string, daysOverdue?: number) => {
+  if (daysOverdue && daysOverdue > 0) return 'red'
+  switch (status) {
+    case 'active': return 'green'
+    case 'grace_period': return 'yellow'
+    case 'overdue': return 'red'
+    case 'suspended': return 'red'
+    default: return 'gray'
+  }
+}
+
+function SubscriptionStatusCell({ sub }: { sub?: SaasSubscription }) {
+  if (!sub) {
+    return <span className="text-slate-400 text-xs">—</span>
+  }
+  const label = sub.status_label || sub.status
+  const isOverdue = (sub.days_overdue ?? 0) > 0
+  const moraDays = isOverdue ? ` (${sub.days_overdue}d mora)` : ''
+  return (
+    <div className="flex flex-col gap-1">
+      <Badge variant={subscriptionStatusVariant(sub.status, sub.days_overdue)}>
+        {label}
+      </Badge>
+      {moraDays && (
+        <span className="text-xs text-red-600 font-medium">{moraDays}</span>
+      )}
+      {(sub.days_in_grace ?? 0) > 0 && (
+        <span className="text-xs text-amber-600">
+          ({sub.days_in_grace}d gracia)
+        </span>
+      )}
+    </div>
+  )
+}
 
 /** Fuerza minúsculas y solo caracteres válidos para subdominio (a-z, 0-9). */
 function normalizeSlugInput(raw: string): string {
@@ -246,6 +282,8 @@ export default function TenantsPage() {
   const [syncLogoBase64, setSyncLogoBase64] = useState<string>('')
   const [consultandoRuc, setConsultandoRuc] = useState<'create' | 'edit' | null>(null)
   const [saasPlans, setSaasPlans] = useState<SaasPlan[]>([])
+  const [moduleCatalog, setModuleCatalog] = useState<SaasModule[]>([])
+  const [subscriptionsByTenantId, setSubscriptionsByTenantId] = useState<Record<number, any>>({})
   /** ¿El plan del tenant en edición existe en el catálogo? Si no, se pide elegir uno. */
   const editPlanMatched = Boolean(editTenant && resolveTenantPlanValue(editTenant, saasPlans))
   const [page, setPage] = useState(1)
@@ -331,6 +369,26 @@ export default function TenantsPage() {
     fetchTenants()
   }, [fetchTenants])
 
+  // Cargar suscripciones para tenants que tengan billing habilitado
+  useEffect(() => {
+    const loadSubscriptions = async () => {
+      const subs: Record<number, any> = {}
+      const promises = tenants
+        .filter(t => t.billing_enabled)
+        .map(async (t) => {
+          const sub = await subscriptionsService.getByTenant(t.id)
+          if (sub) {
+            subs[t.id] = sub
+          }
+        })
+      await Promise.all(promises)
+      setSubscriptionsByTenantId(subs)
+    }
+    if (tenants.length > 0) {
+      loadSubscriptions().catch(() => {})
+    }
+  }, [tenants])
+
   useEffect(() => {
     ubigeoService.getRegiones().then(setRegionesFilter)
   }, [])
@@ -338,6 +396,13 @@ export default function TenantsPage() {
     plansService
       .list()
       .then(plans => setSaasPlans(plans.filter(p => p.active)))
+      .catch(() => {})
+  }, [])
+  // Catálogo dinámico de módulos (fuente única, backend). Reemplaza al antiguo ALL_MODULES.
+  useEffect(() => {
+    plansService
+      .listModules()
+      .then(mods => setModuleCatalog(mods.filter(m => m.active)))
       .catch(() => {})
   }, [])
 
@@ -373,7 +438,7 @@ export default function TenantsPage() {
   const [createUbigeo, setCreateUbigeo] = useState({ regionId: '', provinciaId: '', distritoId: '' })
   const createForm = useForm<CreateForm>({
     resolver: zodResolver(createSchema),
-    defaultValues: { plan: 'trial', subscription_months: 1, rubro: 'general', taxpayer_regime: 'general' },
+    defaultValues: { plan: '', subscription_months: 1, rubro: 'general', taxpayer_regime: 'general' },
   })
 
   const createPlanValue = createForm.watch('plan')
@@ -385,11 +450,11 @@ export default function TenantsPage() {
     const moduleKeys = new Set(matched?.modules ?? [])
     const restaurantFromRubro = createRubroValue === 'gastronomico'
     if (restaurantFromRubro) moduleKeys.add('restaurant')
-    const modules = ALL_MODULES.filter(m => moduleKeys.has(m.key))
+    const modules = moduleCatalog.filter(m => moduleKeys.has(m.key))
     const restaurantExtra =
       restaurantFromRubro && matched && !matched.modules.includes('restaurant')
     return { matched, modules, moduleKeys, restaurantExtra }
-  }, [saasPlans, createPlanValue, createRubroValue])
+  }, [saasPlans, moduleCatalog, createPlanValue, createRubroValue])
 
   const onCreateSubmit = async (data: CreateForm) => {
     try {
@@ -560,9 +625,9 @@ export default function TenantsPage() {
     setLoadingModules(true)
     try {
       const mods = await tenantsService.getModules(t.id)
-      // Completar con todos los módulos conocidos (los que no existen en BD = disabled)
+      // Completar con todo el catálogo dinámico (los que no existen en BD = disabled).
       const existing = new Map(mods.map(m => [m.module_key, m]))
-      const full: TenantModule[] = ALL_MODULES.map(m =>
+      const full: TenantModule[] = moduleCatalog.map(m =>
         existing.get(m.key) ?? { id: 0, tenant_id: t.id, module_key: m.key, enabled: false }
       )
       setModuleTenant({ tenant: t, modules: full })
@@ -597,6 +662,12 @@ export default function TenantsPage() {
 
   const isModuleEnabled = (key: string) =>
     moduleTenant?.modules.some((m) => m.module_key === key && m.enabled) ?? false
+
+  // Origen del módulo habilitado: 'manual' (cortesía) o 'plan'. undefined si no está habilitado.
+  const moduleSource = (key: string): 'plan' | 'manual' | undefined => {
+    const m = moduleTenant?.modules.find((x) => x.module_key === key && x.enabled)
+    return m?.source
+  }
 
   const clearCertUploads = () => {
     setSyncCertBase64('')
@@ -893,7 +964,7 @@ export default function TenantsPage() {
                 <table className="w-full text-sm">
               <thead className="bg-slate-50 border-y border-slate-100">
                 <tr>
-                  {['Empresa', 'Slug', 'Rubro', 'Email', 'RUC', 'Plan', 'Modo SUNAT', 'Facturador', 'Estado', 'Acciones'].map((h) => (
+                  {['Empresa', 'Slug', 'Rubro', 'Email', 'RUC', 'Plan', 'Suscripción', 'Modo SUNAT', 'Facturador', 'Estado', 'Acciones'].map((h) => (
                     <th
                       key={h}
                       className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide"
@@ -936,6 +1007,9 @@ export default function TenantsPage() {
                       {/* plan_name viene resuelto de la suscripción vigente; t.plan es el
                           texto suelto y solo sirve de respaldo. */}
                       <Badge variant="blue">{t.plan_name || t.plan}</Badge>
+                    </td>
+                    <td className="px-4 py-3">
+                      <SubscriptionStatusCell sub={subscriptionsByTenantId[t.id]} />
                     </td>
                     <td className="px-4 py-3">
                       <SunatEnvCell tenant={t} onUpdated={() => fetchTenants()} />
@@ -1095,20 +1169,18 @@ export default function TenantsPage() {
             </FormField>
             <FormField label="Plan *" error={createForm.formState.errors.plan?.message}>
               <select {...createForm.register('plan')} className={inputClass}>
-                {saasPlans.length > 0 ? (
-                  saasPlans.map(p => (
-                    <option key={p.id} value={p.name.toLowerCase()}>
-                      {p.name} — S/ {p.price.toFixed(2)} / {p.billing_cycle === 'yearly' ? 'año' : p.billing_cycle === 'lifetime' ? 'vitalicio' : 'mes'}
-                    </option>
-                  ))
-                ) : (
-                  <>
-                    <option value="trial">Trial</option>
-                    <option value="basic">Basic</option>
-                    <option value="pro">Pro</option>
-                  </>
-                )}
+                <option value="">Seleccione un plan…</option>
+                {saasPlans.map(p => (
+                  <option key={p.id} value={p.name.toLowerCase()}>
+                    {p.name} — S/ {p.price.toFixed(2)} / {p.billing_cycle === 'yearly' ? 'año' : p.billing_cycle === 'lifetime' ? 'vitalicio' : 'mes'}
+                  </option>
+                ))}
               </select>
+              {saasPlans.length === 0 && (
+                <p className="text-xs text-amber-600 mt-1">
+                  No hay planes activos. Crea uno en la sección Planes antes de dar de alta empresas.
+                </p>
+              )}
               {createPlanPreview.matched && (
                 <p className="text-xs text-slate-500 mt-1">
                   {createPlanPreview.matched.description || 'Plan del catálogo SaaS'}
@@ -1174,7 +1246,7 @@ export default function TenantsPage() {
                       key={m.key}
                       className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-xs font-medium text-slate-700"
                     >
-                      <span>{m.icon}</span>
+                      <span>{moduleEmoji(m.key)}</span>
                       {m.name}
                     </span>
                   ))}
@@ -1446,20 +1518,32 @@ export default function TenantsPage() {
             </button>
           </div>
           <div className="space-y-1.5">
-            {ALL_MODULES.map((m) => {
+            {moduleCatalog.map((m) => {
               const enabled = isModuleEnabled(m.key)
+              const source = moduleSource(m.key)
               return (
                 <div
                   key={m.key}
                   className="flex items-center justify-between p-3 rounded-lg border border-slate-100 hover:bg-slate-50 transition-colors"
                 >
                   <div className="flex items-center gap-3">
-                    <span className="text-xl">{m.icon}</span>
+                    <span className="text-xl">{moduleEmoji(m.key)}</span>
                     <div>
-                      <p className="text-sm font-medium text-slate-700">{m.name}</p>
+                      <p className="text-sm font-medium text-slate-700 flex items-center gap-1.5">
+                        {m.name}
+                        {enabled && source === 'manual' && (
+                          <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">Cortesía</span>
+                        )}
+                        {enabled && source === 'plan' && (
+                          <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-blue-50 text-blue-600">Del plan</span>
+                        )}
+                        {!m.implemented && (
+                          <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">No implementado</span>
+                        )}
+                      </p>
                       <p className="text-xs text-slate-400 font-mono">{m.key}</p>
-                      {m.centralNote ? (
-                        <p className="text-[11px] text-slate-500 mt-1 leading-snug">{m.centralNote}</p>
+                      {m.description ? (
+                        <p className="text-[11px] text-slate-500 mt-1 leading-snug">{m.description}</p>
                       ) : null}
                     </div>
                   </div>

@@ -76,11 +76,20 @@ export default function DashboardPage() {
   }
 
   const stats = data!.stats
-  const planData = [
-    { plan: 'Trial', cantidad: stats.trial },
-    { plan: 'Basic', cantidad: stats.basic },
-    { plan: 'Pro', cantidad: stats.pro },
-  ]
+  // Barras por plan REAL (claves dinámicas "plan_<nombre>" que devuelve el backend).
+  const planLabel = (key: string) => {
+    const name = key.replace(/^plan_/, '')
+    if (name === 'sin_plan') return 'Sin plan'
+    return name.charAt(0).toUpperCase() + name.slice(1)
+  }
+  const planData = Object.entries(stats)
+    .filter(([k]) => k.startsWith('plan_'))
+    .map(([k, v]) => ({ plan: planLabel(k), cantidad: v }))
+    .sort((a, b) => b.cantidad - a.cantidad)
+  // Empresas con un plan real asignado (excluye "sin plan").
+  const withPlan = planData
+    .filter(p => p.plan !== 'Sin plan')
+    .reduce((s, p) => s + p.cantidad, 0)
 
   return (
     <div className="space-y-6">
@@ -94,7 +103,7 @@ export default function DashboardPage() {
         <StatCard label="Total Empresas" value={stats.total} icon={Building2} color="bg-blue-500" />
         <StatCard label="Activas" value={stats.active} icon={CheckCircle} color="bg-emerald-500" />
         <StatCard label="Suspendidas" value={stats.inactive} icon={XCircle} color="bg-red-500" />
-        <StatCard label="Plan Pro" value={stats.pro} icon={TrendingUp} color="bg-violet-500" />
+        <StatCard label="Con plan asignado" value={withPlan} icon={TrendingUp} color="bg-violet-500" />
       </div>
 
       {migSummary && (
