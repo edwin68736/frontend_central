@@ -362,6 +362,19 @@ export default function SaasBillingSettingsPage() {
                 </p>
               </div>
               <div>
+                <label className={labelClass}>Plazo de pago (días)</label>
+                <input
+                  type="number"
+                  min={1}
+                  className={inputClass}
+                  value={form.payment_window_days}
+                  onChange={(e) => setForm({ ...form, payment_window_days: parseInt(e.target.value, 10) || 3 })}
+                />
+                <p className={hintClass}>
+                  Días para pagar un cobro recién emitido. Aplica a quien ya está usando el sistema sin haberlo pagado (alta nueva): al agotarse, el cobro aparece como vencido en la campana de cobranza para que decidas suspender o anular. Las renovaciones se rigen por su fecha de vencimiento.
+                </p>
+              </div>
+              <div>
                 <label className={labelClass}>Reconexión (S/)</label>
                 <input
                   type="number"

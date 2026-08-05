@@ -13,6 +13,8 @@ export interface SaasSubscription {
   status_label?: string // traducción al español: "Vigente", "Mora", etc.
   days_overdue?: number // días de mora (0 si vigente)
   days_in_grace?: number // días restantes de gracia (0 si fuera de gracia)
+  /** Es la suscripción que gobierna hoy al tenant; las demás son histórico de renovaciones. */
+  is_current?: boolean
   notes: string
   modules: string[]
   created_at: string
@@ -23,6 +25,9 @@ export interface CreateSubscriptionInput {
   plan_id: number
   months: number
   notes?: string
+  /** Descuento opcional sobre el cobro (precio del plan × meses). */
+  discount_type?: '' | 'percent' | 'fixed'
+  discount_value?: number
 }
 
 export interface SubscriptionListParams {
@@ -58,13 +63,27 @@ export const subscriptionsService = {
     }
   },
 
-  async create(input: CreateSubscriptionInput): Promise<SaasSubscription> {
+  /**
+   * Crea la suscripción y devuelve, además, el cobro que quedó emitido, para poder
+   * registrar el pago en el mismo paso sin una consulta extra.
+   */
+  async create(
+    input: CreateSubscriptionInput,
+  ): Promise<{ subscription: SaasSubscription; billingCycleId: number | null }> {
     const r = await api.post('/superadmin/subscriptions', input)
-    return r.data.data
+    return {
+      subscription: r.data.data,
+      billingCycleId: r.data.billing_cycle?.id ?? null,
+    }
   },
 
   async suspend(id: number, reason = ''): Promise<void> {
     await api.patch(`/superadmin/subscriptions/${id}/suspend`, { reason })
+  },
+
+  /** Anula la suscripción (alta no concretada o baja). Conserva los datos del tenant. */
+  async cancel(id: number, reason: string): Promise<void> {
+    await api.patch(`/superadmin/subscriptions/${id}/cancel`, { reason })
   },
 
   async reactivate(id: number, extraMonths = 0): Promise<void> {

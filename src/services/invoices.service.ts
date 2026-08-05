@@ -14,6 +14,11 @@ export interface SaasInvoice {
   /** pending | overdue | paid | rejected (rejected = anulado) */
   status: string
   paid_at: string
+  /**
+   * El período que cubre este cobro está en curso: el cliente lo está usando. Anularlo le deja
+   * el servicio hasta esa fecha sin deuda registrada, así que se advierte antes de confirmar.
+   */
+  covers_active_period?: boolean
 }
 
 /**

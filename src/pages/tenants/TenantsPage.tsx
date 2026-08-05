@@ -20,6 +20,7 @@ import {
 } from '@/services/tenants.service'
 import { consultaService } from '@/services/consulta.service'
 import { plansService, type SaasPlan, type SaasModule } from '@/services/plans.service'
+import { paymentsService } from '@/services/payments.service'
 import { subscriptionsService, type SaasSubscription } from '@/services/subscriptions.service'
 import { getRootDomain, getTenantHost, resolveTenantUrl, buildMasterAccessUrl } from '@/utils/tenantUrl'
 import { fileToBase64Binary, fileToBase64Text } from '@/utils/fileBase64'
@@ -203,7 +204,11 @@ const createSchema = z.object({
   admin_password: z.string().min(6, 'Mínimo 6 caracteres'),
   address: z.string().optional(),
   ubigeo: z.string().optional(),
-  subscription_months: z.number().min(0).max(120).optional(),
+  // Toda empresa nace con suscripción (las gratuitas, con el plan gratis), así que el mínimo
+  // es 1 mes: antes admitía 0 y el texto prometía «solo empresa», que nunca se implementó.
+  subscription_months: z.number().min(1).max(120).optional(),
+  discount_type: z.enum(['', 'percent', 'fixed']).optional(),
+  discount_value: z.number().min(0).optional(),
 })
 
 const editSchema = z.object({
@@ -438,10 +443,47 @@ export default function TenantsPage() {
   const [createUbigeo, setCreateUbigeo] = useState({ regionId: '', provinciaId: '', distritoId: '' })
   const createForm = useForm<CreateForm>({
     resolver: zodResolver(createSchema),
-    defaultValues: { plan: '', subscription_months: 1, rubro: 'general', taxpayer_regime: 'general' },
+    defaultValues: {
+      plan: '',
+      subscription_months: 1,
+      rubro: 'general',
+      taxpayer_regime: 'general',
+      discount_type: '',
+      discount_value: 0,
+    },
   })
 
+  // Cobro en el mismo paso del alta. Opcional: apagado, la empresa se crea igual.
+  const [payNow, setPayNow] = useState(false)
+  const [payAmount, setPayAmount] = useState(0)
+  const [payMethod, setPayMethod] = useState('transfer')
+  const [payReference, setPayReference] = useState('')
+  const [payReceipt, setPayReceipt] = useState<File | null>(null)
+
+  const resetPaymentFields = () => {
+    setPayNow(false)
+    setPayAmount(0)
+    setPayMethod('transfer')
+    setPayReference('')
+    setPayReceipt(null)
+  }
+
   const createPlanValue = createForm.watch('plan')
+  const createDiscountType = createForm.watch('discount_type')
+  const createDiscountValue = createForm.watch('discount_value')
+  const createMonths = createForm.watch('subscription_months')
+
+  /** Desglose del cobro inicial; replica ComputeCycleAmounts del backend. */
+  const createChargePreview = useMemo(() => {
+    const plan = saasPlans.find(p => p.name.toLowerCase() === (createPlanValue ?? '').toLowerCase())
+    const months = Math.max(1, Number(createMonths) || 1)
+    const gross = plan ? +(plan.price * months).toFixed(2) : 0
+    const value = Number(createDiscountValue) || 0
+    let discount = 0
+    if (value > 0 && createDiscountType === 'percent') discount = Math.min(gross, (gross * value) / 100)
+    else if (value > 0 && createDiscountType === 'fixed') discount = Math.min(gross, value)
+    return { gross, discount: +discount.toFixed(2), net: +(gross - discount).toFixed(2) }
+  }, [saasPlans, createPlanValue, createMonths, createDiscountType, createDiscountValue])
   const createRubroValue = createForm.watch('rubro')
 
   const createPlanPreview = useMemo(() => {
@@ -458,18 +500,45 @@ export default function TenantsPage() {
 
   const onCreateSubmit = async (data: CreateForm) => {
     try {
-      await tenantsService.create({
+      const months = (() => {
+        const m = Number((data as CreateForm & { subscription_months?: number }).subscription_months)
+        return Number.isFinite(m) && m >= 1 ? m : 1
+      })()
+      const { tenant, billingCycleId } = await tenantsService.create({
         ...(data as CreateTenantInput),
         address: data.address ?? '',
         ubigeo: createUbigeo.distritoId || undefined,
-        subscription_months: (() => {
-          const m = Number((data as CreateForm & { subscription_months?: number }).subscription_months)
-          return Number.isFinite(m) ? m : 1
-        })(),
+        subscription_months: months,
+        discount_type: data.discount_type || '',
+        discount_value: Number(data.discount_value) || 0,
       })
       toast.success('Empresa creada correctamente')
+
+      // El pago es opcional y va DESPUÉS del alta: si falla, la empresa ya quedó creada con su
+      // cobro pendiente. Nunca debe impedir dar de alta al cliente.
+      if (payNow) {
+        try {
+          const fd = new FormData()
+          fd.append('tenant_id', String(tenant.id))
+          fd.append('amount', String(payAmount))
+          fd.append('period_months', String(months))
+          fd.append('payment_method', payMethod)
+          fd.append('notes', payReference ? `Pago del alta · ${payReference}` : 'Pago del alta')
+          if (billingCycleId) fd.append('billing_cycle_id', String(billingCycleId))
+          if (payReceipt) fd.append('receipt', payReceipt)
+          await paymentsService.create(fd)
+          toast.success('Pago registrado y aplicado')
+        } catch (e: unknown) {
+          const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error
+          toast.error(
+            `${msg ?? 'No se pudo registrar el pago'} — la empresa quedó creada con el cobro pendiente`,
+          )
+        }
+      }
+
       setShowCreate(false)
       createForm.reset()
+      resetPaymentFields()
       setCreateUbigeo({ regionId: '', provinciaId: '', distritoId: '' })
       fetchTenants()
     } catch (err: unknown) {
@@ -1213,16 +1282,135 @@ export default function TenantsPage() {
             <FormField label="Duración suscripción (meses)" error={createForm.formState.errors.subscription_months?.message}>
               <input
                 type="number"
-                min={0}
+                min={1}
                 max={120}
                 {...createForm.register('subscription_months', { valueAsNumber: true })}
                 className={inputClass}
                 placeholder="1"
               />
               <p className="text-xs text-slate-500 mt-1">
-                Se creará una suscripción con el plan elegido. 0 = no crear suscripción (solo empresa).
+                Se creará la suscripción con el plan elegido y se emitirá su cobro por ese período.
               </p>
             </FormField>
+            <FormField label="Descuento" error={createForm.formState.errors.discount_type?.message}>
+              <select {...createForm.register('discount_type')} className={inputClass}>
+                <option value="">Sin descuento</option>
+                <option value="percent">Porcentaje (%)</option>
+                <option value="fixed">Monto fijo (S/)</option>
+              </select>
+              <p className="text-xs text-slate-500 mt-1">
+                Para contratos largos (6 meses o anual) con rebaja pactada.
+              </p>
+            </FormField>
+            <FormField
+              label={createDiscountType === 'percent' ? 'Porcentaje de descuento' : 'Monto de descuento (S/)'}
+              error={createForm.formState.errors.discount_value?.message}
+            >
+              <input
+                type="number"
+                min={0}
+                max={createDiscountType === 'percent' ? 100 : undefined}
+                step="0.01"
+                disabled={!createDiscountType}
+                {...createForm.register('discount_value', { valueAsNumber: true })}
+                className={`${inputClass} disabled:bg-slate-50 disabled:text-slate-400`}
+              />
+              {createChargePreview.gross > 0 && (
+                <p className="text-xs text-slate-600 mt-1">
+                  Cobro: S/ {createChargePreview.gross.toFixed(2)}
+                  {createChargePreview.discount > 0
+                    ? ` − S/ ${createChargePreview.discount.toFixed(2)} = `
+                    : ' = '}
+                  <strong>S/ {createChargePreview.net.toFixed(2)}</strong>
+                  {!payNow && <span className="text-slate-400"> · queda pendiente de pago</span>}
+                </p>
+              )}
+            </FormField>
+
+            {/* Cobro en el mismo paso. Opcional a propósito: el alta no depende de esto. */}
+            <div className="sm:col-span-2 rounded-lg border border-slate-200 p-3 space-y-3">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 shrink-0"
+                  checked={payNow}
+                  onChange={e => {
+                    setPayNow(e.target.checked)
+                    if (e.target.checked) setPayAmount(createChargePreview.net)
+                  }}
+                />
+                <span>
+                  <span className="text-sm font-medium text-slate-700">Registrar el pago ahora</span>
+                  <span className="block text-xs text-slate-500">
+                    Opcional. Si ya te pagó, la empresa nace al día; si no, deja esto sin marcar y el
+                    cobro sigue pendiente.
+                  </span>
+                </span>
+              </label>
+
+              {payNow && (
+                <div className="space-y-3 pl-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">Monto (S/) *</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min={0}
+                        className={inputClass}
+                        value={payAmount}
+                        onChange={e => setPayAmount(parseFloat(e.target.value) || 0)}
+                      />
+                      {createChargePreview.net > 0 &&
+                        Math.abs(payAmount - createChargePreview.net) > 0.009 && (
+                          <p className="text-[11px] text-amber-700 mt-1">
+                            El cobro es S/ {createChargePreview.net.toFixed(2)}. Un monto menor será
+                            rechazado.
+                          </p>
+                        )}
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">Método</label>
+                      <select
+                        className={inputClass}
+                        value={payMethod}
+                        onChange={e => setPayMethod(e.target.value)}
+                      >
+                        <option value="transfer">Transferencia</option>
+                        <option value="deposit">Depósito</option>
+                        <option value="yape">Yape</option>
+                        <option value="plin">Plin</option>
+                        <option value="cash">Efectivo</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">
+                        Referencia (opcional)
+                      </label>
+                      <input
+                        className={inputClass}
+                        placeholder="N.° de operación"
+                        value={payReference}
+                        onChange={e => setPayReference(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">
+                        Comprobante (opcional)
+                      </label>
+                      <input
+                        type="file"
+                        accept=".jpg,.jpeg,.png,.pdf,.webp"
+                        className="w-full text-xs text-slate-600"
+                        onChange={e => setPayReceipt(e.target.files?.[0] ?? null)}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4 space-y-3">

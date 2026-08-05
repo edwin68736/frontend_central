@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import { toast } from 'sonner'
-import { Plus, CheckCircle, XCircle, Eye, Upload, FileText } from 'lucide-react'
+import { Plus, CheckCircle, XCircle, Eye, Upload, FileText, CreditCard, AlertTriangle } from 'lucide-react'
 import { paymentsService, type SaasPayment } from '../../services/payments.service'
 import { plansService, type SaasPlan } from '../../services/plans.service'
 import { tenantsService, type Tenant } from '../../services/tenants.service'
@@ -34,6 +34,19 @@ const INVOICE_STATUS_CONFIG: Record<string, { label: string; variant: 'green' | 
  * cuántos meses cobrar (vacío = el ciclo del plan) y, si hace falta, un importe distinto
  * al del plan.
  */
+function emptyPaymentForm() {
+  return {
+    tenant_id: 0,
+    amount: '',
+    currency: 'PEN',
+    period_months: 1,
+    notes: '',
+    file: null as File | null,
+    payment_method: 'efectivo',
+    billing_cycle_id: 0,
+  }
+}
+
 function emptyInvoiceForm() {
   return { tenant_id: 0, months: 0, amount: '', notes: '' }
 }
@@ -69,10 +82,9 @@ export default function PaymentsPage() {
   const [reviewNotes, setReviewNotes] = useState('')
   const [saving, setSaving] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
-  const [newPaymentForm, setNewPaymentForm] = useState({
-    tenant_id: 0, amount: '', currency: 'PEN', period_months: 1, notes: '', file: null as File | null,
-    payment_method: 'efectivo', billing_cycle_id: 0,
-  })
+  const [newPaymentForm, setNewPaymentForm] = useState(emptyPaymentForm())
+  /** Cobro que se va a anular; abre la confirmación con sus advertencias. */
+  const [cancelTarget, setCancelTarget] = useState<SaasInvoice | null>(null)
   /** Cobros que este pago puede cancelar (los que siguen por cobrar). */
   const [payableInvoices, setPayableInvoices] = useState<SaasInvoice[]>([])
   /** Pestaña activa: pagos recibidos o cobros emitidos. */
@@ -171,14 +183,34 @@ export default function PaymentsPage() {
     }
   }
 
+  /**
+   * Cobra un cobro concreto: abre el registro de pago ya apuntando a ese ciclo y con su
+   * importe, para no tener que buscarlo a mano y arriesgar aplicarlo al equivocado.
+   */
+  const handlePayInvoice = (inv: SaasInvoice) => {
+    setNewPaymentForm({
+      ...emptyPaymentForm(),
+      tenant_id: inv.tenant_id,
+      billing_cycle_id: inv.id,
+      amount: String(inv.amount),
+      currency: inv.currency || 'PEN',
+    })
+    setShowCreateModal(true)
+  }
+
   /** Anular desde el listado de cobros emitidos (recarga para reflejar el filtro). */
-  const handleCancelIssued = async (inv: SaasInvoice) => {
+  const handleCancelIssued = async () => {
+    if (!cancelTarget) return
+    setSaving(true)
     try {
-      await invoicesService.cancel(inv.id)
+      await invoicesService.cancel(cancelTarget.id)
       toast.success('Cobro anulado')
+      setCancelTarget(null)
       load()
     } catch (e: any) {
       toast.error(e.response?.data?.error ?? 'No se pudo anular el cobro')
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -385,12 +417,21 @@ export default function PaymentsPage() {
                       <td className="px-4 py-3"><Badge variant={cfg.variant}>{cfg.label}</Badge></td>
                       <td className="px-4 py-3 text-right">
                         {inv.status !== 'paid' && inv.status !== 'rejected' && (
-                          <button
-                            onClick={() => handleCancelIssued(inv)}
-                            className="text-xs text-red-600 hover:underline"
-                          >
-                            Anular
-                          </button>
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              onClick={() => handlePayInvoice(inv)}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700 transition-colors"
+                            >
+                              <CreditCard size={14} />
+                              Pagar
+                            </button>
+                            <button
+                              onClick={() => setCancelTarget(inv)}
+                              className="text-xs text-red-600 hover:underline"
+                            >
+                              Anular
+                            </button>
+                          </div>
                         )}
                       </td>
                     </tr>
@@ -514,6 +555,74 @@ export default function PaymentsPage() {
       )}
 
       {/* Modal registrar pago */}
+      <Modal
+        open={cancelTarget !== null}
+        onClose={() => !saving && setCancelTarget(null)}
+        title="Anular cobro"
+      >
+        {cancelTarget && (
+          <div className="space-y-4">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm space-y-1">
+              <div className="flex justify-between">
+                <span className="text-slate-500">Empresa</span>
+                <span className="font-medium text-slate-800">
+                  {cancelTarget.tenant_name || `Empresa #${cancelTarget.tenant_id}`}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Período</span>
+                <span className="text-slate-700">
+                  {fmtDay(cancelTarget.period_start)} → {fmtDay(cancelTarget.period_end)}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Monto</span>
+                <span className="font-semibold text-slate-800">S/ {cancelTarget.amount.toFixed(2)}</span>
+              </div>
+            </div>
+
+            {/* Anular el cobro del período que el cliente está usando le regala ese tramo:
+                conserva el acceso y deja de figurar la deuda. */}
+            {cancelTarget.covers_active_period ? (
+              <div className="flex gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-900">
+                <AlertTriangle className="shrink-0 mt-0.5" size={18} />
+                <div>
+                  <p className="font-medium">Este cobro cubre el período que el cliente está usando</p>
+                  <p className="text-xs mt-0.5">
+                    Al anularlo conserva el servicio hasta el {fmtDay(cancelTarget.period_end)} sin deuda
+                    registrada. Si lo que quieres es cortarle el acceso, suspende su suscripción o ajusta
+                    la vigencia desde <strong>Suscripciones</strong>.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-slate-600">
+                El cobro dejará de figurar como deuda. Esta acción no se puede deshacer.
+              </p>
+            )}
+
+            <div className="flex gap-3 pt-1">
+              <button
+                type="button"
+                onClick={() => setCancelTarget(null)}
+                disabled={saving}
+                className="flex-1 px-4 py-2 border border-slate-300 text-slate-700 rounded-lg text-sm hover:bg-slate-50 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleCancelIssued}
+                disabled={saving}
+                className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700 disabled:opacity-50"
+              >
+                {saving ? 'Anulando...' : 'Anular cobro'}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
       <Modal open={showCreateModal} onClose={() => setShowCreateModal(false)} title="Registrar pago manual">
         <div className="space-y-4">
           <div>

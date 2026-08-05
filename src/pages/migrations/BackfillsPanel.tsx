@@ -28,8 +28,8 @@ export function BackfillsPanel() {
       .catch(() => toast.error('No se pudieron cargar los backfills'))
   }, [])
 
-  const selectedLabel =
-    version === 0 ? 'todos los backfills' : backfills.find((b) => b.version === version)?.name ?? `v${version}`
+  const selected = version === 0 ? null : backfills.find((b) => b.version === version)
+  const selectedLabel = version === 0 ? 'todos los backfills' : selected?.name ?? `v${version}`
 
   const runForTenant = async () => {
     if (!tenantId) {
@@ -123,6 +123,12 @@ export function BackfillsPanel() {
                 </option>
               ))}
             </select>
+            {/* El nombre técnico no alcanza para decidir si ejecutarlo sobre producción. */}
+            {selected?.description && (
+              <p className="mt-2 text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                {selected.description}
+              </p>
+            )}
           </div>
 
           <div>

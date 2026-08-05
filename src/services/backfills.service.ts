@@ -4,6 +4,8 @@ import { api } from './api'
 export interface BackfillInfo {
   version: number
   name: string
+  /** Qué corrige, en castellano. Puede faltar en los backfills antiguos. */
+  description?: string
 }
 
 export interface BackfillFleetResult {

@@ -26,7 +26,37 @@ export interface SaasPayment {
   created_at: string
 }
 
+/** Cobro que necesita atención del usuario central (campana del header). */
+export interface CollectionAlert {
+  tenant_id: number
+  tenant_name: string
+  subscription_id?: number
+  billing_cycle_id?: number
+  payment_id?: number
+  plan_name?: string
+  amount: number
+  due_date?: string
+  days_overdue?: number
+  /** El tenant nunca pagó ningún ciclo: es un alta que no se concretó. */
+  never_paid?: boolean
+  tenant_suspended?: boolean
+}
+
+export interface CollectionAlerts {
+  /** Comprobantes que subieron los tenants y esperan validación. */
+  pending_review: CollectionAlert[]
+  /** Cobros que agotaron su ventana de pago sin pagarse. */
+  overdue: CollectionAlert[]
+  never_paid_count: number
+  total: number
+}
+
 export const paymentsService = {
+  async alerts(): Promise<CollectionAlerts> {
+    const r = await api.get('/superadmin/payments/alerts')
+    return r.data
+  },
+
   async list(status = ''): Promise<SaasPayment[]> {
     const r = await api.get('/superadmin/payments', { params: { status } })
     return r.data.data ?? []

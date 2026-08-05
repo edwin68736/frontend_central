@@ -68,6 +68,9 @@ export interface CreateTenantInput {
   taxpayer_regime?: 'general' | 'nrus'
   /** Duración en meses de la suscripción al crear la empresa (0 = no crear suscripción). Por defecto 1. */
   subscription_months?: number
+  /** Descuento opcional sobre el cobro inicial (precio del plan × meses). */
+  discount_type?: '' | 'percent' | 'fixed'
+  discount_value?: number
 }
 
 export interface UpdateTenantInput {
@@ -171,9 +174,16 @@ export const tenantsService = {
     return data
   },
 
-  async create(input: CreateTenantInput): Promise<Tenant> {
-    const { data } = await api.post<{ data: Tenant }>('/superadmin/tenants', input)
-    return data.data
+  /**
+   * Crea la empresa y devuelve, además, el cobro que quedó emitido, para poder registrar el
+   * pago en el mismo paso sin una consulta extra.
+   */
+  async create(input: CreateTenantInput): Promise<{ tenant: Tenant; billingCycleId: number | null }> {
+    const { data } = await api.post<{ data: Tenant; billing_cycle?: { id: number } | null }>(
+      '/superadmin/tenants',
+      input,
+    )
+    return { tenant: data.data, billingCycleId: data.billing_cycle?.id ?? null }
   },
 
   async update(id: number, input: UpdateTenantInput): Promise<void> {

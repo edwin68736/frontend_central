@@ -24,6 +24,8 @@ export interface SupportConfig {
 export interface SaasPlatformSettings {
   reminder_days: number[]
   grace_period_days: number
+  /** Días para pagar un cobro ya emitido antes de darlo por vencido (altas nuevas). */
+  payment_window_days: number
   reconnection_fee: number
   auto_suspend_enabled: boolean
   provisional_reactivation_enabled: boolean
