@@ -8,6 +8,7 @@ import {
 } from '@/services/documentPackages.service'
 import Modal from '@/components/ui/Modal'
 import Spinner from '@/components/ui/Spinner'
+import { saasAssetUrl } from '@/services/saasSettings.service'
 
 const INPUT =
   'w-full border border-slate-300 rounded-lg px-3 py-2 text-slate-800 text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500'
@@ -228,7 +229,7 @@ export default function DocumentPackagesPage() {
                   <p className="text-slate-800 font-semibold tabular-nums">S/ {r.amount.toFixed(2)}</p>
                   {r.receipt_url && (
                     <a
-                      href={r.receipt_url}
+                      href={saasAssetUrl(r.receipt_url)}
                       target="_blank"
                       rel="noreferrer"
                       className="text-indigo-600 hover:text-indigo-700 text-xs font-medium hover:underline"
