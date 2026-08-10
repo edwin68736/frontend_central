@@ -66,6 +66,7 @@ export default function SubscriptionsPage() {
     plan_id: 0,
     months: 1,
     notes: '',
+    start_date: '',
     discount_type: '',
     discount_value: 0,
   })
@@ -107,6 +108,20 @@ export default function SubscriptionsPage() {
   })()
 
   const expectedAmount = +(grossAmount - discountAmount).toFixed(2)
+
+  /** Preview de vigencia: mismo cálculo que el backend (inicio + meses), solo para mostrar. No
+   * aplica si el tenant elegido ya tiene una suscripción vigente con este plan (esa renueva en
+   * sitio encadenando desde su propio vencimiento, ignora start_date) — el preview igual sirve de
+   * referencia aproximada en ese caso. */
+  const datesPreview = (() => {
+    const months = Math.max(1, form.months || 1)
+    const start = form.start_date ? new Date(`${form.start_date}T00:00:00`) : new Date()
+    start.setHours(0, 0, 0, 0)
+    const end = new Date(start)
+    end.setMonth(end.getMonth() + months)
+    const fmt = (d: Date) => d.toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' })
+    return { startLabel: fmt(start), endLabel: fmt(end) }
+  })()
   const [saving, setSaving] = useState(false)
   const [checkingExpired, setCheckingExpired] = useState(false)
   const [showAdjustModal, setShowAdjustModal] = useState(false)
@@ -350,7 +365,7 @@ export default function SubscriptionsPage() {
           </button>
           <button
             onClick={() => {
-              setForm({ tenant_id: 0, plan_id: 0, months: 1, notes: '' })
+              setForm({ tenant_id: 0, plan_id: 0, months: 1, notes: '', start_date: '' })
               setShowCreateModal(true)
             }}
             className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium transition-colors"
@@ -568,6 +583,23 @@ export default function SubscriptionsPage() {
               value={form.months}
               onChange={e => setForm(f => ({ ...f, months: +e.target.value }))}
             />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">
+              Fecha de inicio (opcional)
+            </label>
+            <input
+              type="date"
+              min={new Date().toISOString().slice(0, 10)}
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-slate-800 text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+              value={form.start_date ?? ''}
+              onChange={e => setForm(f => ({ ...f, start_date: e.target.value }))}
+            />
+            <p className="text-xs text-slate-500 mt-1">
+              Vacío = arranca hoy. Sin efecto si el tenant ya tiene una suscripción vigente con
+              este plan (esa renueva encadenando desde su propio vencimiento). Vigencia:{' '}
+              <strong>{datesPreview.startLabel}</strong> → <strong>{datesPreview.endLabel}</strong>
+            </p>
           </div>
           {/* Descuento: el caso típico es contratar 6 meses o un año a cambio de rebaja. */}
           <div className="grid grid-cols-2 gap-3">

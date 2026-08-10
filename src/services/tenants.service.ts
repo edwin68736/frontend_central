@@ -68,6 +68,10 @@ export interface CreateTenantInput {
   taxpayer_regime?: 'general' | 'nrus'
   /** Duración en meses de la suscripción al crear la empresa (0 = no crear suscripción). Por defecto 1. */
   subscription_months?: number
+  /** YYYY-MM-DD opcional: la suscripción/primer cobro arranca esta fecha en vez de hoy (debe ser
+   * hoy o futura). Útil cuando se registra la empresa hoy pero recién va a operar/pagar más
+   * adelante. Vacío = arranca hoy, como siempre. */
+  start_date?: string
   /** Descuento opcional sobre el cobro inicial (precio del plan × meses). */
   discount_type?: '' | 'percent' | 'fixed'
   discount_value?: number

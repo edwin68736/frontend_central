@@ -25,6 +25,10 @@ export interface CreateSubscriptionInput {
   plan_id: number
   months: number
   notes?: string
+  /** YYYY-MM-DD opcional: arranca esta fecha en vez de hoy (debe ser hoy o futura). Solo tiene
+   * efecto si el tenant no tiene ya una suscripción vigente con este plan (esa siempre encadena
+   * sola desde su propio vencimiento). */
+  start_date?: string
   /** Descuento opcional sobre el cobro (precio del plan × meses). */
   discount_type?: '' | 'percent' | 'fixed'
   discount_value?: number

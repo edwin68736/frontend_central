@@ -207,6 +207,17 @@ const createSchema = z.object({
   // Toda empresa nace con suscripción (las gratuitas, con el plan gratis), así que el mínimo
   // es 1 mes: antes admitía 0 y el texto prometía «solo empresa», que nunca se implementó.
   subscription_months: z.number().min(1).max(120).optional(),
+  // Vacío = arranca hoy (default de siempre). Si se elige, no puede ser una fecha pasada — el
+  // backend vuelve a validar esto igual, nunca confiar solo en el frontend.
+  start_date: z
+    .string()
+    .optional()
+    .refine((v) => {
+      if (!v) return true
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+      return new Date(`${v}T00:00:00`) >= today
+    }, 'No puede ser una fecha pasada'),
   discount_type: z.enum(['', 'percent', 'fixed']).optional(),
   discount_value: z.number().min(0).optional(),
 })
@@ -482,6 +493,18 @@ export default function TenantsPage() {
   const createDiscountType = createForm.watch('discount_type')
   const createDiscountValue = createForm.watch('discount_value')
   const createMonths = createForm.watch('subscription_months')
+  const createStartDate = createForm.watch('start_date')
+
+  /** Preview de vigencia: mismo cálculo que el backend (inicio + meses), solo para mostrar. */
+  const createDatesPreview = useMemo(() => {
+    const months = Math.max(1, Number(createMonths) || 1)
+    const start = createStartDate ? new Date(`${createStartDate}T00:00:00`) : new Date()
+    start.setHours(0, 0, 0, 0)
+    const end = new Date(start)
+    end.setMonth(end.getMonth() + months)
+    const fmt = (d: Date) => d.toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' })
+    return { startLabel: fmt(start), endLabel: fmt(end) }
+  }, [createMonths, createStartDate])
 
   /** Desglose del cobro inicial; replica ComputeCycleAmounts del backend. */
   const createChargePreview = useMemo(() => {
@@ -1300,6 +1323,22 @@ export default function TenantsPage() {
               />
               <p className="text-xs text-slate-500 mt-1">
                 Se creará la suscripción con el plan elegido y se emitirá su cobro por ese período.
+              </p>
+            </FormField>
+            <FormField
+              label="Fecha de inicio de la suscripción (opcional)"
+              error={createForm.formState.errors.start_date?.message}
+            >
+              <input
+                type="date"
+                min={new Date().toISOString().slice(0, 10)}
+                {...createForm.register('start_date')}
+                className={inputClass}
+              />
+              <p className="text-xs text-slate-500 mt-1">
+                Vacío = arranca hoy. Útil si la empresa se registra hoy pero recién va a operar/pagar
+                más adelante. Vigencia: <strong>{createDatesPreview.startLabel}</strong> →{' '}
+                <strong>{createDatesPreview.endLabel}</strong>
               </p>
             </FormField>
             <FormField label="Descuento" error={createForm.formState.errors.discount_type?.message}>

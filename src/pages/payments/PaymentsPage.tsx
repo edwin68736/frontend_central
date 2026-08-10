@@ -78,6 +78,7 @@ export default function PaymentsPage() {
   const [selectedPayment, setSelectedPayment] = useState<SaasPayment | null>(null)
   const [reviewAction, setReviewAction] = useState<'approve' | 'reject'>('approve')
   const [reviewPlanId, setReviewPlanId] = useState(0)
+  const [reviewPeriodMonths, setReviewPeriodMonths] = useState(0)
   const [reviewNotes, setReviewNotes] = useState('')
   const [saving, setSaving] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -289,6 +290,10 @@ export default function PaymentsPage() {
     // billing_cycle previo): aprobar sin tocar el dropdown debe respetar lo que pidió, no
     // quedarse callado con el plan viejo. El admin sigue pudiendo cambiarlo antes de confirmar.
     setReviewPlanId(payment.requested_plan_id ?? 0)
+    // Precargado con lo que pidió el tenant (period_months, seteado desde la Fase B); el admin
+    // lo puede corregir antes de confirmar. 0 en el payment (pagos viejos, previos a esta
+    // mejora) deja el campo en 0 = "usar lo que ya venga calculado" (fallback del backend).
+    setReviewPeriodMonths(payment.period_months || 0)
     setShowReviewModal(true)
   }
 
@@ -297,7 +302,7 @@ export default function PaymentsPage() {
     setSaving(true)
     try {
       if (reviewAction === 'approve') {
-        await paymentsService.approve(selectedPayment.id, reviewPlanId, reviewNotes)
+        await paymentsService.approve(selectedPayment.id, reviewPlanId, reviewNotes, reviewPeriodMonths)
         toast.success('Pago aprobado — suscripción actualizada')
       } else {
         await paymentsService.reject(selectedPayment.id, reviewNotes)
@@ -790,17 +795,31 @@ export default function PaymentsPage() {
           )}
 
           {reviewAction === 'approve' && (
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Plan a asignar (opcional)</label>
-              <select
-                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-slate-800 text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                value={reviewPlanId}
-                onChange={e => setReviewPlanId(+e.target.value)}
-              >
-                <option value={0}>Usar plan actual del tenant</option>
-                {plans.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
-            </div>
+            <>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Plan a asignar (opcional)</label>
+                <select
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-slate-800 text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                  value={reviewPlanId}
+                  onChange={e => setReviewPlanId(+e.target.value)}
+                >
+                  <option value={0}>Usar plan actual del tenant</option>
+                  {plans.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Meses a aplicar {(selectedPayment?.period_months ?? 0) > 0 && '(precargado con lo que pidió el tenant)'}
+                </label>
+                <input
+                  type="number" min={0} max={24}
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-slate-800 text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                  value={reviewPeriodMonths}
+                  onChange={e => setReviewPeriodMonths(+e.target.value)}
+                  placeholder="0 = usar lo que ya venga calculado"
+                />
+              </div>
+            </>
           )}
 
           <div>
