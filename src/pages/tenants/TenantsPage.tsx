@@ -252,7 +252,17 @@ export default function TenantsPage() {
   const navigate = useNavigate()
   const [tenants, setTenants] = useState<Tenant[]>([])
   const [loading, setLoading] = useState(true)
+  /** Valor tal cual lo tipea el usuario; controla el input, no dispara fetch directamente. */
+  const [searchInput, setSearchInput] = useState('')
+  /** Valor debounced (300ms): es el que usa fetchTenants. Antes cada tecla disparaba un fetch,
+   * y tipear rápido llegaba a chocar con el rate limit global del backend (300 req/min por IP,
+   * compartido con el resto de la API) — "demasiadas solicitudes, intente de nuevo en un
+   * momento". */
   const [search, setSearch] = useState('')
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(searchInput), 300)
+    return () => clearTimeout(t)
+  }, [searchInput])
   const [statusFilter, setStatusFilter] = useState('')
   const [regionFilter, setRegionFilter] = useState('')
   const [provinciaFilter, setProvinciaFilter] = useState('')
@@ -957,8 +967,8 @@ export default function TenantsPage() {
             <input
               type="text"
               placeholder="Buscar por nombre, email, RUC..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
               className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
