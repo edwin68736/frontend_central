@@ -9,6 +9,7 @@ import Spinner from '../../components/ui/Spinner'
 import Badge from '../../components/ui/Badge'
 import TenantSearchSelect from '../../components/TenantSearchSelect'
 import { invoicesService, type SaasInvoice, type RenewalPreview } from '../../services/invoices.service'
+import { saasAssetUrl } from '../../services/saasSettings.service'
 
 const STATUS_CONFIG = {
   // pending_review: lo envía el tenant con su comprobante. Es el caso más frecuente y el
@@ -64,8 +65,6 @@ function fmtDay(d: string) {
 function fmtDate(d: string) {
   return new Date(d).toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' })
 }
-
-const API_BASE = import.meta.env.VITE_API_URL?.replace('/api', '') ?? 'http://localhost:3000'
 
 export default function PaymentsPage() {
   const [payments, setPayments] = useState<SaasPayment[]>([])
@@ -523,7 +522,7 @@ export default function PaymentsPage() {
                       <div className="flex items-center gap-2">
                         {p.fiscal_doc_url ? (
                           <a
-                            href={`${API_BASE}${p.fiscal_doc_url}`}
+                            href={saasAssetUrl(p.fiscal_doc_url)}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="inline-flex items-center gap-1 text-xs text-emerald-700 hover:underline"
@@ -828,7 +827,7 @@ export default function PaymentsPage() {
           <div className="space-y-3">
             {selectedPayment.receipt_url.endsWith('.pdf') ? (
               <a
-                href={`${API_BASE}${selectedPayment.receipt_url}`}
+                href={saasAssetUrl(selectedPayment.receipt_url)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="block text-center py-8 border border-slate-200 rounded-lg text-indigo-600 hover:bg-indigo-50 font-medium"
@@ -838,14 +837,14 @@ export default function PaymentsPage() {
               </a>
             ) : (
               <img
-                src={`${API_BASE}${selectedPayment.receipt_url}`}
+                src={saasAssetUrl(selectedPayment.receipt_url)}
                 alt="Comprobante"
                 className="w-full rounded-lg border border-slate-200 max-h-96 object-contain bg-slate-50"
                 onError={e => { (e.target as HTMLImageElement).src = '' }}
               />
             )}
             <a
-              href={`${API_BASE}${selectedPayment.receipt_url}`}
+              href={saasAssetUrl(selectedPayment.receipt_url)}
               target="_blank"
               rel="noopener noreferrer"
               className="block text-center text-xs text-slate-500 hover:text-slate-600"
