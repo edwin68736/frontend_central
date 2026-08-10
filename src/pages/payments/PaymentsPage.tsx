@@ -286,7 +286,10 @@ export default function PaymentsPage() {
     setSelectedPayment(payment)
     setReviewAction(action)
     setReviewNotes('')
-    setReviewPlanId(0)
+    // Preseleccionar el plan que el tenant pidió (solicitud de renovación/cambio de plan sin
+    // billing_cycle previo): aprobar sin tocar el dropdown debe respetar lo que pidió, no
+    // quedarse callado con el plan viejo. El admin sigue pudiendo cambiarlo antes de confirmar.
+    setReviewPlanId(payment.requested_plan_id ?? 0)
     setShowReviewModal(true)
   }
 
@@ -776,6 +779,14 @@ export default function PaymentsPage() {
               <div className="text-slate-700">
                 <span className="text-slate-500">Período:</span> {selectedPayment.period_months} mes(es)
               </div>
+              {selectedPayment.requested_plan_id ? (
+                <div className="text-slate-700">
+                  <span className="text-slate-500">Plan pedido por el tenant:</span>{' '}
+                  <span className="font-semibold">
+                    {plans.find(p => p.id === selectedPayment.requested_plan_id)?.name ?? `#${selectedPayment.requested_plan_id}`}
+                  </span>
+                </div>
+              ) : null}
             </div>
           )}
 
