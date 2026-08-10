@@ -17,6 +17,12 @@ export interface SaasPayment {
    * que el compilador detectara que los botones de aprobar/rechazar no se renderizaban.
    */
   status: 'pending' | 'pending_review' | 'approved' | 'rejected'
+  /**
+   * Plan que el TENANT pidió al enviar este pago (elegir plan / renovar sin billing_cycle
+   * previo, ver POST /api/subscription/renewal-request). null cuando el pago es contra un
+   * billing_cycle ya emitido (no hubo elección: ese ciclo ya trae su plan).
+   */
+  requested_plan_id?: number | null
   notes: string
   admin_notes: string
   /** Boleta/factura emitida al cliente por este pago (PDF). */
