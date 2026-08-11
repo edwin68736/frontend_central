@@ -1,7 +1,16 @@
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { Plus, Pencil, Trash2, ToggleLeft, ToggleRight, CheckCircle2, Blocks } from 'lucide-react'
-import { plansService, moduleRequires, type SaasPlan, type SaasModule, type CreatePlanInput, type ModuleInput } from '../../services/plans.service'
+import {
+  plansService,
+  moduleRequires,
+  type SaasPlan,
+  type SaasModule,
+  type CreatePlanInput,
+  type ModuleInput,
+  type PlanCycleInput,
+  type DiscountType,
+} from '../../services/plans.service'
 import Modal from '../../components/ui/Modal'
 import Spinner from '../../components/ui/Spinner'
 
@@ -9,6 +18,24 @@ const CYCLE_LABELS: Record<string, string> = {
   monthly: 'Mensual',
   yearly: 'Anual',
   lifetime: 'Vitalicio',
+}
+
+/** Ciclos fijos que puede elegir un tenant al renovar por autoservicio — ver backend
+ *  saas.FixedPlanCycleMonths. Deliberadamente fijo acá también, no se agregan ni quitan. */
+const FIXED_CYCLE_MONTHS = [1, 3, 6, 12]
+
+function emptyCycles(): PlanCycleInput[] {
+  return FIXED_CYCLE_MONTHS.map(months => ({ months, discount_type: '', discount_value: 0, enabled: true }))
+}
+
+/** Bruto/neto en vivo mientras el admin edita — el backend recalcula igual al guardar
+ *  (pricing.ComputeCycleAmounts), esto es solo para que vea el resultado sin tener que guardar. */
+function previewCycleAmounts(price: number, months: number, discountType: DiscountType, discountValue: number) {
+  const gross = +(price * months).toFixed(2)
+  let discount = 0
+  if (discountType === 'percent' && discountValue > 0) discount = Math.min(gross, (gross * discountValue) / 100)
+  else if (discountType === 'fixed' && discountValue > 0) discount = Math.min(gross, discountValue)
+  return { gross, net: Math.max(0, +(gross - discount).toFixed(2)) }
 }
 
 export default function PlansPage() {
@@ -21,6 +48,7 @@ export default function PlansPage() {
     name: '', description: '', price: 0, billing_cycle: 'monthly', modules: [],
     is_unlimited_documents: false, monthly_documents_limit: 50,
     max_users: 0, max_branches: 0, max_products: 0,
+    cycles: emptyCycles(),
   }
   const [form, setForm] = useState<CreatePlanInput>(emptyForm)
   const [saving, setSaving] = useState(false)
@@ -97,6 +125,12 @@ export default function PlansPage() {
       max_users: plan.max_users ?? 0,
       max_branches: plan.max_branches ?? 0,
       max_products: plan.max_products ?? 0,
+      cycles: FIXED_CYCLE_MONTHS.map(months => {
+        const existing = (plan.cycles ?? []).find(c => c.months === months)
+        return existing
+          ? { months, discount_type: existing.discount_type, discount_value: existing.discount_value, enabled: existing.enabled }
+          : { months, discount_type: '', discount_value: 0, enabled: true }
+      }),
     })
     setShowModal(true)
   }
@@ -113,6 +147,13 @@ export default function PlansPage() {
       const toAdd = [key, ...deps].filter(k => !f.modules.includes(k))
       return { ...f, modules: [...f.modules, ...toAdd] }
     })
+  }
+
+  const updateCycle = (months: number, patch: Partial<PlanCycleInput>) => {
+    setForm(f => ({
+      ...f,
+      cycles: f.cycles.map(c => (c.months === months ? { ...c, ...patch } : c)),
+    }))
   }
 
   const handleSave = async () => {
@@ -203,6 +244,17 @@ export default function PlansPage() {
               Límites — Usuarios: {plan.max_users ? plan.max_users : '∞'} · Sucursales: {plan.max_branches ? plan.max_branches : '∞'} · Productos: {plan.max_products ? plan.max_products : '∞'}
             </p>
 
+            {plan.billing_cycle !== 'lifetime' && (plan.cycles ?? []).some(c => c.enabled) && (
+              <div className="flex flex-wrap gap-1.5">
+                {(plan.cycles ?? []).filter(c => c.enabled).map(c => (
+                  <span key={c.months} className="text-[10px] px-2 py-0.5 bg-emerald-900/30 text-emerald-300 rounded-full border border-emerald-700/40">
+                    {c.months}m: S/ {c.net_amount.toFixed(2)}
+                    {c.net_amount !== c.gross_amount && <span className="line-through opacity-60 ml-1">S/ {c.gross_amount.toFixed(2)}</span>}
+                  </span>
+                ))}
+              </div>
+            )}
+
             <div className="flex flex-wrap gap-1">
               {(plan.modules ?? []).map(k => (
                 <span key={k} className="text-xs px-2 py-0.5 bg-indigo-900/50 text-indigo-300 rounded-full border border-indigo-700/50">
@@ -280,6 +332,66 @@ export default function PlansPage() {
               </select>
             </div>
           </div>
+
+          {form.billing_cycle !== 'lifetime' && (
+            <div className="rounded-lg border border-slate-200 p-3 space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-slate-700">Descuento por ciclo</label>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  El tenant elige uno de estos 4 ciclos al renovar por autoservicio (Tukifac/Tukichef). Sin
+                  descuento, ese ciclo cobra precio pleno (precio × meses).
+                </p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {form.cycles.map(c => {
+                  const { gross, net } = previewCycleAmounts(form.price, c.months, c.discount_type, c.discount_value)
+                  return (
+                    <div key={c.months} className={`rounded-lg border p-2.5 space-y-2 ${c.enabled ? 'border-slate-200 bg-white' : 'border-slate-200 bg-slate-50 opacity-70'}`}>
+                      <div className="flex items-center justify-between">
+                        <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                          <input
+                            type="checkbox"
+                            checked={c.enabled}
+                            onChange={e => updateCycle(c.months, { enabled: e.target.checked })}
+                          />
+                          {c.months} {c.months === 1 ? 'mes' : 'meses'}
+                        </label>
+                        <span className="text-xs text-slate-500">
+                          {net === gross ? `S/ ${gross.toFixed(2)}` : (
+                            <>
+                              <span className="line-through text-slate-400">S/ {gross.toFixed(2)}</span>{' '}
+                              <span className="font-semibold text-emerald-700">S/ {net.toFixed(2)}</span>
+                            </>
+                          )}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <select
+                          className="border border-slate-300 rounded-lg px-2 py-1.5 text-xs"
+                          value={c.discount_type}
+                          onChange={e => updateCycle(c.months, { discount_type: e.target.value as DiscountType, discount_value: e.target.value ? c.discount_value : 0 })}
+                        >
+                          <option value="">Sin descuento</option>
+                          <option value="percent">% Porcentaje</option>
+                          <option value="fixed">S/ Monto fijo</option>
+                        </select>
+                        <input
+                          type="number"
+                          min={0}
+                          step={c.discount_type === 'percent' ? 1 : 0.01}
+                          disabled={!c.discount_type}
+                          className="border border-slate-300 rounded-lg px-2 py-1.5 text-xs disabled:bg-slate-100"
+                          value={c.discount_value}
+                          onChange={e => updateCycle(c.months, { discount_value: parseFloat(e.target.value) || 0 })}
+                          placeholder={c.discount_type === 'percent' ? '% ej. 15' : 'S/ ej. 10'}
+                        />
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
 
           <div className="rounded-lg border border-slate-200 p-3 space-y-3">
             <label className="flex items-center gap-2 text-sm text-slate-700">

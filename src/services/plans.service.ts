@@ -16,6 +16,20 @@ export interface SaasModule {
   active: boolean
 }
 
+/** "" = sin descuento (precio pleno para ese ciclo). */
+export type DiscountType = '' | 'percent' | 'fixed'
+
+/** Ciclo fijo del plan (1/3/6/12 meses — nada más, ver backend saas.FixedPlanCycleMonths) con su
+ *  precio ya calculado. gross_amount/net_amount vienen del backend — nunca se recalculan acá. */
+export interface PlanCycle {
+  months: number
+  discount_type: DiscountType
+  discount_value: number
+  enabled: boolean
+  gross_amount: number
+  net_amount: number
+}
+
 export interface SaasPlan {
   id: number
   name: string
@@ -30,7 +44,18 @@ export interface SaasPlan {
   max_users?: number
   max_branches?: number
   max_products?: number
+  /** Los 4 ciclos fijos del plan con su descuento — siempre 4, ver backend saas.LoadPlanCycles. */
+  cycles: PlanCycle[]
   created_at: string
+}
+
+/** Lo que se manda para un ciclo al crear/editar un plan — sin gross_amount/net_amount, eso lo
+ *  calcula el backend. */
+export interface PlanCycleInput {
+  months: number
+  discount_type: DiscountType
+  discount_value: number
+  enabled: boolean
 }
 
 export interface CreatePlanInput {
@@ -44,6 +69,7 @@ export interface CreatePlanInput {
   max_users?: number
   max_branches?: number
   max_products?: number
+  cycles: PlanCycleInput[]
 }
 
 export interface ModuleInput {
