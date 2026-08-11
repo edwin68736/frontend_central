@@ -1,9 +1,15 @@
 import { api } from './api'
 
+/** "qr": el método muestra su propio QR (qr_url, opcional). "bank_account": muestra la lista
+ *  compartida de cuentas bancarias (bank_accounts) en vez de un QR. */
+export type PaymentMethodKind = 'qr' | 'bank_account'
+
 export interface PaymentMethodConfig {
   key: string
   label: string
   enabled: boolean
+  kind: PaymentMethodKind
+  qr_url?: string
 }
 
 export interface BankAccountConfig {
@@ -93,9 +99,11 @@ export const saasSettingsService = {
   save: (data: SaasPlatformSettings): Promise<{ success: boolean }> =>
     api.put('/superadmin/saas-settings', data).then(r => r.data),
 
-  uploadQr: (kind: 'yape' | 'plin', file: File): Promise<{ success: boolean; url: string }> => {
+  /** kind: la key del método de pago (ya no limitado a 'yape'/'plin' — cualquier método con
+   *  kind='qr' en payment_methods puede recibir su propio QR). */
+  uploadQr: (methodKey: string, file: File): Promise<{ success: boolean; url: string }> => {
     const fd = new FormData()
-    fd.append('kind', kind)
+    fd.append('kind', methodKey)
     fd.append('file', file)
     return api.post('/superadmin/saas-settings/upload-qr', fd, {
       headers: { 'Content-Type': 'multipart/form-data' },

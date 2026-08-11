@@ -66,6 +66,25 @@ function fmtDate(d: string) {
   return new Date(d).toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
+/** Texto de tooltip con el QR/cuenta bancaria que se le mostró al tenant al pagar (ver
+ *  payment_details_json en el backend, pkg/saas/payment_method_snapshot.go). */
+function paymentDetailsTooltip(p: SaasPayment): string | undefined {
+  if (!p.payment_details_json) return undefined
+  try {
+    const parsed = JSON.parse(p.payment_details_json)
+    if (p.payment_method_kind === 'qr' && parsed?.qr_url) return `QR: ${parsed.qr_url}`
+    if (p.payment_method_kind === 'bank_account' && Array.isArray(parsed)) {
+      return parsed
+        .map((b: { bank?: string; account_number?: string }) => `${b.bank ?? ''} ${b.account_number ?? ''}`.trim())
+        .filter(Boolean)
+        .join(' | ')
+    }
+  } catch {
+    return undefined
+  }
+  return undefined
+}
+
 export default function PaymentsPage() {
   const [payments, setPayments] = useState<SaasPayment[]>([])
   const [plans, setPlans] = useState<SaasPlan[]>([])
@@ -467,6 +486,7 @@ export default function PaymentsPage() {
               <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Empresa</th>
               <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Monto</th>
               <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Período</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Método</th>
               <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Comprobante</th>
               <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Estado</th>
               <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Fecha</th>
@@ -487,6 +507,13 @@ export default function PaymentsPage() {
                   </td>
                   <td className="px-4 py-3 text-slate-600">
                     {p.period_months} {p.period_months === 1 ? 'mes' : 'meses'}
+                  </td>
+                  <td className="px-4 py-3" title={paymentDetailsTooltip(p)}>
+                    {p.payment_method_label || p.payment_method ? (
+                      <span className="text-slate-700">{p.payment_method_label || p.payment_method}</span>
+                    ) : (
+                      <span className="text-xs text-slate-400">—</span>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     {p.receipt_url ? (

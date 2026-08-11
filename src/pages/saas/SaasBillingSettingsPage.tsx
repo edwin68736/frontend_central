@@ -6,7 +6,6 @@ import {
   CreditCard,
   KeyRound,
   Play,
-  QrCode,
   Save,
   Settings2,
   Headphones,
@@ -21,6 +20,7 @@ import {
   saasQrPreviewUrl,
   saasSettingsService,
   type BankAccountConfig,
+  type PaymentMethodConfig,
   type SaasPlatformSettings,
 } from '@/services/saasSettings.service'
 import { apiErrorMessage } from '@/utils/apiError'
@@ -71,6 +71,34 @@ const emptyBank = (): BankAccountConfig => ({
   enabled: true,
 })
 
+/** key estable a partir del label ("Yape Empresa" -> "yape_empresa"), única contra existingKeys
+ *  (agrega sufijo numérico si choca) — la key es lo que identifica al método para el upload de
+ *  QR y para saas_payments.payment_method, así que no puede quedar vacía ni repetirse. */
+function slugifyMethodKey(label: string, existingKeys: string[]): string {
+  const base =
+    label
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '') || 'metodo'
+  let key = base
+  let n = 2
+  while (existingKeys.includes(key)) {
+    key = `${base}_${n}`
+    n += 1
+  }
+  return key
+}
+
+const emptyMethod = (existingKeys: string[]): PaymentMethodConfig => ({
+  key: slugifyMethodKey('Nuevo método', existingKeys),
+  label: 'Nuevo método',
+  enabled: true,
+  kind: 'bank_account',
+})
+
 function SectionTitle({ icon: Icon, title, description }: { icon: typeof Clock; title: string; description?: string }) {
   return (
     <div className="flex items-start gap-3">
@@ -90,11 +118,12 @@ export default function SaasBillingSettingsPage() {
   const [loading, setLoading] = useState(true)
   const [savingSection, setSavingSection] = useState<SaveSection | null>(null)
   const [reminderInput, setReminderInput] = useState('7,5,3,1')
-  const [uploading, setUploading] = useState<'yape' | 'plin' | null>(null)
-  const [clearingQr, setClearingQr] = useState<'yape' | 'plin' | null>(null)
-  const [qrPreviewVersion, setQrPreviewVersion] = useState({ yape: 0, plin: 0 })
-  const yapeFileRef = useRef<HTMLInputElement>(null)
-  const plinFileRef = useRef<HTMLInputElement>(null)
+  // Keyed por payment method key: cualquier método con kind='qr' puede tener su propio QR, no
+  // solo yape/plin (ver PaymentMethodConfig.kind/qr_url).
+  const [uploading, setUploading] = useState<string | null>(null)
+  const [clearingQr, setClearingQr] = useState<string | null>(null)
+  const [qrPreviewVersion, setQrPreviewVersion] = useState<Record<string, number>>({})
+  const qrFileRefs = useRef<Record<string, HTMLInputElement | null>>({})
   const [opsNewKey, setOpsNewKey] = useState('')
   const [opsCurrentKey, setOpsCurrentKey] = useState('')
   const [opsSaving, setOpsSaving] = useState(false)
@@ -135,52 +164,58 @@ export default function SaasBillingSettingsPage() {
     }
   }
 
-  const qrFileRef = (kind: 'yape' | 'plin') => (kind === 'yape' ? yapeFileRef : plinFileRef)
+  const qrFileRef = (key: string) => {
+    if (!qrFileRefs.current[key]) qrFileRefs.current[key] = null
+    return {
+      get current() {
+        return qrFileRefs.current[key] ?? null
+      },
+      set current(el: HTMLInputElement | null) {
+        qrFileRefs.current[key] = el
+      },
+    }
+  }
 
-  const qrPreviewSrc = (kind: 'yape' | 'plin', url: string) => {
+  const qrPreviewSrc = (key: string, url: string) => {
     if (!url) return ''
-    const v = qrPreviewVersion[kind] || form?.updated_at || ''
+    const v = qrPreviewVersion[key] || form?.updated_at || ''
     return saasQrPreviewUrl(url, v)
   }
 
-  const uploadQr = async (kind: 'yape' | 'plin', file: File) => {
-    setUploading(kind)
+  const uploadQr = async (key: string, file: File) => {
+    setUploading(key)
     try {
-      const r = await saasSettingsService.uploadQr(kind, file)
-      const refreshed = await saasSettingsService.get()
+      const r = await saasSettingsService.uploadQr(key, file)
       setForm((f) => {
         if (!f) return f
-        return {
-          ...f,
-          ...refreshed,
-          yape_qr_url: kind === 'yape' ? r.url : refreshed.yape_qr_url,
-          plin_qr_url: kind === 'plin' ? r.url : refreshed.plin_qr_url,
-        }
+        const methods = f.payment_methods.map((m) => (m.key === key ? { ...m, qr_url: r.url } : m))
+        return { ...f, payment_methods: methods }
       })
-      setQrPreviewVersion((v) => ({ ...v, [kind]: Date.now() }))
-      toast.success(`QR ${kind} actualizado`)
+      setQrPreviewVersion((v) => ({ ...v, [key]: Date.now() }))
+      toast.success('QR actualizado')
     } catch (e) {
       toast.error(apiErrorMessage(e, 'Error subiendo QR'))
     } finally {
       setUploading(null)
-      const input = qrFileRef(kind).current
+      const input = qrFileRef(key).current
       if (input) input.value = ''
     }
   }
 
-  const clearQr = async (kind: 'yape' | 'plin') => {
+  const clearQr = async (key: string) => {
     const payload = buildPayload()
     if (!payload) return
-    if (kind === 'yape') payload.yape_qr_url = ''
-    else payload.plin_qr_url = ''
-    setClearingQr(kind)
+    payload.payment_methods = payload.payment_methods.map((m) => (m.key === key ? { ...m, qr_url: '' } : m))
+    setClearingQr(key)
     try {
       await saasSettingsService.save(payload)
-      setForm((f) =>
-        f ? (kind === 'yape' ? { ...f, yape_qr_url: '' } : { ...f, plin_qr_url: '' }) : f,
-      )
-      setQrPreviewVersion((v) => ({ ...v, [kind]: 0 }))
-      toast.success(`QR ${kind} eliminado`)
+      setForm((f) => {
+        if (!f) return f
+        const methods = f.payment_methods.map((m) => (m.key === key ? { ...m, qr_url: '' } : m))
+        return { ...f, payment_methods: methods }
+      })
+      setQrPreviewVersion((v) => ({ ...v, [key]: 0 }))
+      toast.success('QR eliminado')
     } catch (e) {
       toast.error(apiErrorMessage(e, 'Error al quitar QR'))
     } finally {
@@ -194,6 +229,29 @@ export default function SaasBillingSettingsPage() {
       const banks = [...f.bank_accounts]
       banks[idx] = { ...banks[idx], ...patch }
       return { ...f, bank_accounts: banks }
+    })
+  }
+
+  const updateMethod = (idx: number, patch: Partial<PaymentMethodConfig>) => {
+    setForm((f) => {
+      if (!f) return f
+      const methods = [...f.payment_methods]
+      methods[idx] = { ...methods[idx], ...patch }
+      return { ...f, payment_methods: methods }
+    })
+  }
+
+  const addMethod = () => {
+    setForm((f) => {
+      if (!f) return f
+      return { ...f, payment_methods: [...f.payment_methods, emptyMethod(f.payment_methods.map((m) => m.key))] }
+    })
+  }
+
+  const removeMethod = (idx: number) => {
+    setForm((f) => {
+      if (!f) return f
+      return { ...f, payment_methods: f.payment_methods.filter((_, j) => j !== idx) }
     })
   }
 
@@ -330,9 +388,7 @@ export default function SaasBillingSettingsPage() {
         </div>
       </Modal>
 
-      {/* Fila 1: Reglas + Métodos de pago */}
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-        <Card id="reglas" className="scroll-mt-24">
+      <Card id="reglas" className="scroll-mt-24">
           <CardHeader>
             <SectionTitle
               icon={Clock}
@@ -477,48 +533,152 @@ export default function SaasBillingSettingsPage() {
               label="Guardar reglas"
             />
           </CardBody>
-        </Card>
+      </Card>
 
-        <Card id="pagos" className="scroll-mt-24">
-          <CardHeader>
-            <SectionTitle icon={CreditCard} title="Métodos de pago" description="Activa o desactiva opciones visibles en /subscription" />
-          </CardHeader>
-          <CardBody>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {form.payment_methods.map((m, i) => (
-                <label
-                  key={m.key}
-                  className={`flex items-center justify-between gap-3 p-3 rounded-lg border text-sm cursor-pointer transition-colors ${
-                    m.enabled ? 'border-blue-200 bg-blue-50/50' : 'border-slate-200 bg-slate-50/50'
-                  }`}
-                >
-                  <span className="font-medium text-slate-700">{m.label}</span>
+      {/* Métodos de pago: cada uno puede tener su propio QR (kind="qr") o mostrar la lista de
+          cuentas bancarias de la sección de abajo (kind="bank_account"). Antes esto vivía en dos
+          tarjetas sueltas sin ninguna relación entre sí — un QR de Yape/Plin fijo y aparte de la
+          lista de métodos habilitados. */}
+      <Card id="pagos" className="scroll-mt-24">
+        <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <SectionTitle
+            icon={CreditCard}
+            title="Métodos de pago"
+            description="Visibles en /subscription. Cada uno puede tener su propio QR o mostrar las cuentas bancarias."
+          />
+          <button
+            type="button"
+            className="text-sm text-blue-600 font-medium hover:underline shrink-0 self-start sm:self-center"
+            onClick={addMethod}
+          >
+            + Agregar método
+          </button>
+        </CardHeader>
+        <CardBody className="space-y-4">
+          {form.payment_methods.map((m, i) => {
+            const busy = uploading === m.key || clearingQr === m.key
+            const previewSrc = qrPreviewSrc(m.key, m.qr_url ?? '')
+            return (
+              <div
+                key={m.key}
+                className={`border rounded-xl p-4 space-y-3 ${
+                  m.enabled ? 'border-blue-200 bg-blue-50/30' : 'border-slate-200 bg-slate-50/50'
+                }`}
+              >
+                <div className="flex flex-wrap items-center gap-3">
+                  <label className="flex items-center gap-2 shrink-0">
+                    <input
+                      type="checkbox"
+                      checked={m.enabled}
+                      onChange={(e) => updateMethod(i, { enabled: e.target.checked })}
+                    />
+                    <span className="text-xs text-slate-500">Activo</span>
+                  </label>
                   <input
-                    type="checkbox"
-                    checked={m.enabled}
-                    onChange={(e) => {
-                      const methods = [...form.payment_methods]
-                      methods[i] = { ...m, enabled: e.target.checked }
-                      setForm({ ...form, payment_methods: methods })
-                    }}
+                    className={`${inputClass} flex-1 min-w-[10rem]`}
+                    placeholder="Nombre (ej. Yape)"
+                    value={m.label}
+                    onChange={(e) => updateMethod(i, { label: e.target.value })}
                   />
-                </label>
-              ))}
-            </div>
-            <SectionSaveFooter
-              section="pagos"
-              savingSection={savingSection}
-              onSave={() => void saveSection('pagos', 'Métodos de pago guardados')}
-              label="Guardar métodos"
-            />
-          </CardBody>
-        </Card>
-      </div>
+                  <select
+                    className={`${inputClass} w-auto`}
+                    value={m.kind}
+                    onChange={(e) => updateMethod(i, { kind: e.target.value as PaymentMethodConfig['kind'] })}
+                  >
+                    <option value="qr">QR</option>
+                    <option value="bank_account">Cuenta bancaria</option>
+                  </select>
+                  <button
+                    type="button"
+                    className="text-xs text-red-600 hover:underline shrink-0"
+                    onClick={() => removeMethod(i)}
+                  >
+                    Eliminar
+                  </button>
+                </div>
+
+                {m.kind === 'qr' ? (
+                  <div className="flex flex-col sm:flex-row gap-4 items-start">
+                    {m.qr_url && previewSrc ? (
+                      <img
+                        key={previewSrc}
+                        src={previewSrc}
+                        alt={`QR ${m.label}`}
+                        className="h-28 w-28 shrink-0 object-contain border border-slate-100 rounded-lg bg-white"
+                      />
+                    ) : (
+                      <div className="h-28 w-28 shrink-0 flex items-center justify-center border border-dashed border-slate-200 rounded-lg text-[11px] text-slate-400 text-center px-1">
+                        Sin imagen
+                      </div>
+                    )}
+                    <div className="flex flex-col gap-2 min-w-0">
+                      <input
+                        ref={(el) => {
+                          qrFileRefs.current[m.key] = el
+                        }}
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp,image/*"
+                        className="hidden"
+                        disabled={busy}
+                        onChange={(e) => {
+                          const f = e.target.files?.[0]
+                          if (f) void uploadQr(m.key, f)
+                        }}
+                      />
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => qrFileRef(m.key).current?.click()}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+                        >
+                          <Upload size={14} />
+                          {uploading === m.key ? 'Subiendo…' : m.qr_url ? 'Cambiar imagen' : 'Subir imagen'}
+                        </button>
+                        {m.qr_url ? (
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => void clearQr(m.key)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-red-200 text-red-700 hover:bg-red-50 disabled:opacity-50"
+                          >
+                            <Trash2 size={14} />
+                            {clearingQr === m.key ? 'Quitando…' : 'Quitar QR'}
+                          </button>
+                        ) : null}
+                      </div>
+                      <p className="text-[11px] text-slate-400">JPG, PNG o WebP, máx. 10 MB. Se guarda al subirla.</p>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-500 flex items-center gap-1.5">
+                    <Banknote size={14} className="shrink-0" />
+                    Muestra las cuentas bancarias activas de la sección de abajo.
+                  </p>
+                )}
+              </div>
+            )
+          })}
+          {form.payment_methods.length === 0 && (
+            <p className="text-sm text-slate-400 text-center py-6">No hay métodos configurados.</p>
+          )}
+          <SectionSaveFooter
+            section="pagos"
+            savingSection={savingSection}
+            onSave={() => void saveSection('pagos', 'Métodos de pago guardados')}
+            label="Guardar métodos"
+          />
+        </CardBody>
+      </Card>
 
       {/* Cuentas bancarias */}
       <Card id="bancos" className="scroll-mt-24">
         <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <SectionTitle icon={Banknote} title="Cuentas bancarias" description="Datos para transferencia en el portal de pago" />
+          <SectionTitle
+            icon={Banknote}
+            title="Cuentas bancarias"
+            description="Se muestran para cualquier método de pago con tipo 'Cuenta bancaria' (arriba)"
+          />
           <button
             type="button"
             className="text-sm text-blue-600 font-medium hover:underline shrink-0 self-start sm:self-center"
@@ -571,143 +731,68 @@ export default function SaasBillingSettingsPage() {
         </CardBody>
       </Card>
 
-      {/* QR + Portal + Soporte */}
+      {/* Portal + Soporte */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card id="qr" className="scroll-mt-24">
+        <Card className="scroll-mt-24">
           <CardHeader>
-            <SectionTitle icon={QrCode} title="QR Yape / Plin" description="Imágenes para pago móvil en el portal tenant" />
+            <SectionTitle icon={Settings2} title="Portal alternativo" description="Opcional — botón secundario en /subscription" />
           </CardHeader>
           <CardBody>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {(['yape', 'plin'] as const).map((kind) => {
-                const url = kind === 'yape' ? form.yape_qr_url : form.plin_qr_url
-                const busy = uploading === kind || clearingQr === kind
-                const previewSrc = qrPreviewSrc(kind, url)
-                return (
-                  <div key={kind} className="border border-slate-200 rounded-xl p-4 space-y-3">
-                    <p className="text-sm font-semibold text-slate-700 capitalize">{kind}</p>
-                    {url && previewSrc ? (
-                      <img
-                        key={previewSrc}
-                        src={previewSrc}
-                        alt={`QR ${kind}`}
-                        className="h-32 w-full object-contain border border-slate-100 rounded-lg bg-white"
-                      />
-                    ) : (
-                      <div className="h-32 flex items-center justify-center border border-dashed border-slate-200 rounded-lg text-xs text-slate-400">
-                        Sin imagen
-                      </div>
-                    )}
-                    <input
-                      ref={qrFileRef(kind)}
-                      type="file"
-                      accept="image/jpeg,image/png,image/webp,image/*"
-                      className="hidden"
-                      disabled={busy}
-                      onChange={(e) => {
-                        const f = e.target.files?.[0]
-                        if (f) void uploadQr(kind, f)
-                      }}
-                    />
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => qrFileRef(kind).current?.click()}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
-                      >
-                        <Upload size={14} />
-                        {uploading === kind ? 'Subiendo…' : url ? 'Cambiar imagen' : 'Subir imagen'}
-                      </button>
-                      {url ? (
-                        <button
-                          type="button"
-                          disabled={busy}
-                          onClick={() => void clearQr(kind)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-red-200 text-red-700 hover:bg-red-50 disabled:opacity-50"
-                        >
-                          <Trash2 size={14} />
-                          {clearingQr === kind ? 'Quitando…' : 'Quitar QR'}
-                        </button>
-                      ) : null}
-                    </div>
-                    {url ? (
-                      <p className="text-[11px] text-slate-400 break-all">{url}</p>
-                    ) : null}
-                  </div>
-                )
-              })}
-            </div>
-            <p className="text-xs text-slate-500 mt-3">
-              Las imágenes se guardan al subirlas (JPG, PNG o WebP, máx. 10 MB) en{' '}
-              <code className="text-slate-600 bg-slate-100 px-1 rounded">storage/saas/</code>. Al reemplazar
-              una imagen, use <strong>Cambiar imagen</strong>; la vista previa se actualiza de inmediato.
-            </p>
+            <input
+              className={inputClass}
+              value={form.portal_url_override}
+              onChange={(e) => setForm({ ...form, portal_url_override: e.target.value })}
+              placeholder="https://… (vacío = flujo oficial)"
+            />
+            <SectionSaveFooter
+              section="portal"
+              savingSection={savingSection}
+              onSave={() => void saveSection('portal', 'Portal alternativo guardado')}
+              label="Guardar portal"
+            />
           </CardBody>
         </Card>
 
-        <div className="space-y-6">
-          <Card className="scroll-mt-24">
-            <CardHeader>
-              <SectionTitle icon={Settings2} title="Portal alternativo" description="Opcional — botón secundario en /subscription" />
-            </CardHeader>
-            <CardBody>
+        <Card id="soporte" className="scroll-mt-24">
+          <CardHeader>
+            <SectionTitle icon={Headphones} title="Soporte para tenants" description="Contacto visible en el portal de suscripción" />
+          </CardHeader>
+          <CardBody className="space-y-3">
+            <div>
+              <label className={labelClass}>WhatsApp</label>
               <input
                 className={inputClass}
-                value={form.portal_url_override}
-                onChange={(e) => setForm({ ...form, portal_url_override: e.target.value })}
-                placeholder="https://… (vacío = flujo oficial)"
+                placeholder="+51 999 000 000"
+                value={form.support.whatsapp}
+                onChange={(e) => setForm({ ...form, support: { ...form.support, whatsapp: e.target.value } })}
               />
-              <SectionSaveFooter
-                section="portal"
-                savingSection={savingSection}
-                onSave={() => void saveSection('portal', 'Portal alternativo guardado')}
-                label="Guardar portal"
+            </div>
+            <div>
+              <label className={labelClass}>Email</label>
+              <input
+                className={inputClass}
+                placeholder="soporte@empresa.com"
+                value={form.support.email}
+                onChange={(e) => setForm({ ...form, support: { ...form.support, email: e.target.value } })}
               />
-            </CardBody>
-          </Card>
-
-          <Card id="soporte" className="scroll-mt-24">
-            <CardHeader>
-              <SectionTitle icon={Headphones} title="Soporte para tenants" description="Contacto visible en el portal de suscripción" />
-            </CardHeader>
-            <CardBody className="space-y-3">
-              <div>
-                <label className={labelClass}>WhatsApp</label>
-                <input
-                  className={inputClass}
-                  placeholder="+51 999 000 000"
-                  value={form.support.whatsapp}
-                  onChange={(e) => setForm({ ...form, support: { ...form.support, whatsapp: e.target.value } })}
-                />
-              </div>
-              <div>
-                <label className={labelClass}>Email</label>
-                <input
-                  className={inputClass}
-                  placeholder="soporte@empresa.com"
-                  value={form.support.email}
-                  onChange={(e) => setForm({ ...form, support: { ...form.support, email: e.target.value } })}
-                />
-              </div>
-              <div>
-                <label className={labelClass}>Teléfono</label>
-                <input
-                  className={inputClass}
-                  placeholder="+51 …"
-                  value={form.support.phone}
-                  onChange={(e) => setForm({ ...form, support: { ...form.support, phone: e.target.value } })}
-                />
-              </div>
-              <SectionSaveFooter
-                section="soporte"
-                savingSection={savingSection}
-                onSave={() => void saveSection('soporte', 'Datos de soporte guardados')}
-                label="Guardar soporte"
+            </div>
+            <div>
+              <label className={labelClass}>Teléfono</label>
+              <input
+                className={inputClass}
+                placeholder="+51 …"
+                value={form.support.phone}
+                onChange={(e) => setForm({ ...form, support: { ...form.support, phone: e.target.value } })}
               />
-            </CardBody>
-          </Card>
-        </div>
+            </div>
+            <SectionSaveFooter
+              section="soporte"
+              savingSection={savingSection}
+              onSave={() => void saveSection('soporte', 'Datos de soporte guardados')}
+              label="Guardar soporte"
+            />
+          </CardBody>
+        </Card>
       </div>
 
       {/* Seguridad */}

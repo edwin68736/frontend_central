@@ -10,6 +10,13 @@ export interface SaasPayment {
   currency: string
   period_months: number
   receipt_url: string
+  payment_method?: string
+  /** Snapshot de lo que se le mostró al tenant al pagar (nombre del método, si era QR o cuenta
+   *  bancaria, y el detalle vigente en ese momento) — ver PaymentMethodConfig en
+   *  saasSettings.service.ts. Vacío en pagos registrados antes de este campo. */
+  payment_method_label?: string
+  payment_method_kind?: 'qr' | 'bank_account'
+  payment_details_json?: string
   /**
    * pending_review = enviado por el tenant (espera validación).
    * pending = registrado por un admin desde este panel.
