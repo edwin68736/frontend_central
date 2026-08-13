@@ -10,15 +10,25 @@ export interface PaymentMethodConfig {
   enabled: boolean
   kind: PaymentMethodKind
   qr_url?: string
+  /** Logo del método (ej. ícono de Yape/Plin), se muestra junto al QR al tenant. */
+  logo_url?: string
+  /** Texto libre (multilínea) con datos para pagar — ej. número de Yape/Plin y titular. */
+  extra_info?: string
 }
 
 export interface BankAccountConfig {
+  /** Generado al crear la cuenta (ver ensureBankAccountId) — permite asociarle un logo propio. */
+  id?: string
   bank: string
   account_number: string
   cci: string
   holder: string
   currency: string
   enabled: boolean
+  /** Logo del banco, se muestra junto a los datos de la cuenta al tenant. */
+  logo_url?: string
+  /** Texto libre (multilínea) con instrucciones adicionales (ej. "solo depósitos en agencia"). */
+  extra_info?: string
 }
 
 export interface SupportConfig {
@@ -106,6 +116,22 @@ export const saasSettingsService = {
     fd.append('kind', methodKey)
     fd.append('file', file)
     return api.post('/superadmin/saas-settings/upload-qr', fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data)
+  },
+
+  /** Logo de un método de pago (target='method', kind=su key) o de una cuenta bancaria
+   *  (target='bank', kind=su id). Se guarda en la MISMA carpeta que los QR. */
+  uploadLogo: (
+    target: 'method' | 'bank',
+    kind: string,
+    file: File,
+  ): Promise<{ success: boolean; url: string }> => {
+    const fd = new FormData()
+    fd.append('target', target)
+    fd.append('kind', kind)
+    fd.append('file', file)
+    return api.post('/superadmin/saas-settings/upload-logo', fd, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }).then(r => r.data)
   },

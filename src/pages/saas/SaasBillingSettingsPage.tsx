@@ -62,7 +62,13 @@ function SectionSaveFooter({
   )
 }
 
+/** id estable para una cuenta bancaria — permite asociarle un logo propio (ver upload-logo). */
+function genBankAccountId(): string {
+  return `ba_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+}
+
 const emptyBank = (): BankAccountConfig => ({
+  id: genBankAccountId(),
   bank: '',
   holder: '',
   account_number: '',
@@ -124,6 +130,13 @@ export default function SaasBillingSettingsPage() {
   const [clearingQr, setClearingQr] = useState<string | null>(null)
   const [qrPreviewVersion, setQrPreviewVersion] = useState<Record<string, number>>({})
   const qrFileRefs = useRef<Record<string, HTMLInputElement | null>>({})
+  // Logo: mismo patrón que el QR de arriba, pero compartido entre métodos de pago (target=
+  // 'method', kind=key) y cuentas bancarias (target='bank', kind=id) — la key de estos estados
+  // combina ambos ("method:yape" / "bank:ba_...") para no chocar entre sí.
+  const [uploadingLogo, setUploadingLogo] = useState<string | null>(null)
+  const [clearingLogo, setClearingLogo] = useState<string | null>(null)
+  const [logoPreviewVersion, setLogoPreviewVersion] = useState<Record<string, number>>({})
+  const logoFileRefs = useRef<Record<string, HTMLInputElement | null>>({})
   const [opsNewKey, setOpsNewKey] = useState('')
   const [opsCurrentKey, setOpsCurrentKey] = useState('')
   const [opsSaving, setOpsSaving] = useState(false)
@@ -134,7 +147,10 @@ export default function SaasBillingSettingsPage() {
     saasSettingsService
       .get()
       .then((data) => {
-        setForm(data)
+        // Cuentas guardadas antes de que existiera el campo "id" no lo traen — se les asigna
+        // uno recién ahora, así el logo queda asociable desde la primera vez que se editan.
+        const bank_accounts = data.bank_accounts.map((b) => (b.id ? b : { ...b, id: genBankAccountId() }))
+        setForm({ ...data, bank_accounts })
         setReminderInput((data.reminder_days || [7, 5, 3, 1]).join(','))
       })
       .catch(() => toast.error('Error cargando configuración'))
@@ -220,6 +236,81 @@ export default function SaasBillingSettingsPage() {
       toast.error(apiErrorMessage(e, 'Error al quitar QR'))
     } finally {
       setClearingQr(null)
+    }
+  }
+
+  const logoKeyFor = (target: 'method' | 'bank', kind: string) => `${target}:${kind}`
+
+  const logoFileRef = (key: string) => {
+    if (!logoFileRefs.current[key]) logoFileRefs.current[key] = null
+    return {
+      get current() {
+        return logoFileRefs.current[key] ?? null
+      },
+      set current(el: HTMLInputElement | null) {
+        logoFileRefs.current[key] = el
+      },
+    }
+  }
+
+  const logoPreviewSrc = (key: string, url: string) => {
+    if (!url) return ''
+    const v = logoPreviewVersion[key] || form?.updated_at || ''
+    return saasQrPreviewUrl(url, v)
+  }
+
+  const uploadLogo = async (target: 'method' | 'bank', kind: string, file: File) => {
+    const stateKey = logoKeyFor(target, kind)
+    setUploadingLogo(stateKey)
+    try {
+      const r = await saasSettingsService.uploadLogo(target, kind, file)
+      setForm((f) => {
+        if (!f) return f
+        if (target === 'method') {
+          const methods = f.payment_methods.map((m) => (m.key === kind ? { ...m, logo_url: r.url } : m))
+          return { ...f, payment_methods: methods }
+        }
+        const banks = f.bank_accounts.map((b) => (b.id === kind ? { ...b, logo_url: r.url } : b))
+        return { ...f, bank_accounts: banks }
+      })
+      setLogoPreviewVersion((v) => ({ ...v, [stateKey]: Date.now() }))
+      toast.success('Logo actualizado')
+    } catch (e) {
+      toast.error(apiErrorMessage(e, 'Error subiendo logo'))
+    } finally {
+      setUploadingLogo(null)
+      const input = logoFileRef(stateKey).current
+      if (input) input.value = ''
+    }
+  }
+
+  const clearLogo = async (target: 'method' | 'bank', kind: string) => {
+    const stateKey = logoKeyFor(target, kind)
+    const payload = buildPayload()
+    if (!payload) return
+    if (target === 'method') {
+      payload.payment_methods = payload.payment_methods.map((m) => (m.key === kind ? { ...m, logo_url: '' } : m))
+    } else {
+      payload.bank_accounts = payload.bank_accounts.map((b) => (b.id === kind ? { ...b, logo_url: '' } : b))
+    }
+    setClearingLogo(stateKey)
+    try {
+      await saasSettingsService.save(payload)
+      setForm((f) => {
+        if (!f) return f
+        if (target === 'method') {
+          const methods = f.payment_methods.map((m) => (m.key === kind ? { ...m, logo_url: '' } : m))
+          return { ...f, payment_methods: methods }
+        }
+        const banks = f.bank_accounts.map((b) => (b.id === kind ? { ...b, logo_url: '' } : b))
+        return { ...f, bank_accounts: banks }
+      })
+      setLogoPreviewVersion((v) => ({ ...v, [stateKey]: 0 }))
+      toast.success('Logo eliminado')
+    } catch (e) {
+      toast.error(apiErrorMessage(e, 'Error al quitar logo'))
+    } finally {
+      setClearingLogo(null)
     }
   }
 
@@ -598,58 +689,132 @@ export default function SaasBillingSettingsPage() {
                 </div>
 
                 {m.kind === 'qr' ? (
-                  <div className="flex flex-col sm:flex-row gap-4 items-start">
-                    {m.qr_url && previewSrc ? (
-                      <img
-                        key={previewSrc}
-                        src={previewSrc}
-                        alt={`QR ${m.label}`}
-                        className="h-28 w-28 shrink-0 object-contain border border-slate-100 rounded-lg bg-white"
-                      />
-                    ) : (
-                      <div className="h-28 w-28 shrink-0 flex items-center justify-center border border-dashed border-slate-200 rounded-lg text-[11px] text-slate-400 text-center px-1">
-                        Sin imagen
-                      </div>
-                    )}
-                    <div className="flex flex-col gap-2 min-w-0">
-                      <input
-                        ref={(el) => {
-                          qrFileRefs.current[m.key] = el
-                        }}
-                        type="file"
-                        accept="image/jpeg,image/png,image/webp,image/*"
-                        className="hidden"
-                        disabled={busy}
-                        onChange={(e) => {
-                          const f = e.target.files?.[0]
-                          if (f) void uploadQr(m.key, f)
-                        }}
-                      />
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          type="button"
+                  <>
+                    <div className="flex flex-col sm:flex-row gap-4 items-start">
+                      {m.qr_url && previewSrc ? (
+                        <img
+                          key={previewSrc}
+                          src={previewSrc}
+                          alt={`QR ${m.label}`}
+                          className="h-28 w-28 shrink-0 object-contain border border-slate-100 rounded-lg bg-white"
+                        />
+                      ) : (
+                        <div className="h-28 w-28 shrink-0 flex items-center justify-center border border-dashed border-slate-200 rounded-lg text-[11px] text-slate-400 text-center px-1">
+                          Sin imagen
+                        </div>
+                      )}
+                      <div className="flex flex-col gap-2 min-w-0">
+                        <input
+                          ref={(el) => {
+                            qrFileRefs.current[m.key] = el
+                          }}
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp,image/*"
+                          className="hidden"
                           disabled={busy}
-                          onClick={() => qrFileRef(m.key).current?.click()}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
-                        >
-                          <Upload size={14} />
-                          {uploading === m.key ? 'Subiendo…' : m.qr_url ? 'Cambiar imagen' : 'Subir imagen'}
-                        </button>
-                        {m.qr_url ? (
+                          onChange={(e) => {
+                            const f = e.target.files?.[0]
+                            if (f) void uploadQr(m.key, f)
+                          }}
+                        />
+                        <div className="flex flex-wrap gap-2">
                           <button
                             type="button"
                             disabled={busy}
-                            onClick={() => void clearQr(m.key)}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-red-200 text-red-700 hover:bg-red-50 disabled:opacity-50"
+                            onClick={() => qrFileRef(m.key).current?.click()}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
                           >
-                            <Trash2 size={14} />
-                            {clearingQr === m.key ? 'Quitando…' : 'Quitar QR'}
+                            <Upload size={14} />
+                            {uploading === m.key ? 'Subiendo…' : m.qr_url ? 'Cambiar imagen' : 'Subir imagen'}
                           </button>
-                        ) : null}
+                          {m.qr_url ? (
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => void clearQr(m.key)}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-red-200 text-red-700 hover:bg-red-50 disabled:opacity-50"
+                            >
+                              <Trash2 size={14} />
+                              {clearingQr === m.key ? 'Quitando…' : 'Quitar QR'}
+                            </button>
+                          ) : null}
+                        </div>
+                        <p className="text-[11px] text-slate-400">JPG, PNG o WebP, máx. 10 MB. Se guarda al subirla.</p>
                       </div>
-                      <p className="text-[11px] text-slate-400">JPG, PNG o WebP, máx. 10 MB. Se guarda al subirla.</p>
                     </div>
-                  </div>
+
+                    {/* Logo + datos adicionales: se muestran al costado del QR en /subscription
+                        (ej. Yape: logo + "Número: ... / Titular: ..."). Logo se guarda en la MISMA
+                        carpeta que el QR (storage/saas), solo cambia el prefijo del archivo. */}
+                    {(() => {
+                      const logoKey = logoKeyFor('method', m.key)
+                      const logoBusy = uploadingLogo === logoKey || clearingLogo === logoKey
+                      const logoSrc = logoPreviewSrc(logoKey, m.logo_url ?? '')
+                      return (
+                        <div className="flex flex-col sm:flex-row gap-4 items-start pt-1">
+                          {m.logo_url && logoSrc ? (
+                            <img
+                              key={logoSrc}
+                              src={logoSrc}
+                              alt={`Logo ${m.label}`}
+                              className="h-14 w-14 shrink-0 object-contain border border-slate-100 rounded-lg bg-white"
+                            />
+                          ) : (
+                            <div className="h-14 w-14 shrink-0 flex items-center justify-center border border-dashed border-slate-200 rounded-lg text-[10px] text-slate-400 text-center px-1">
+                              Sin logo
+                            </div>
+                          )}
+                          <div className="flex flex-col gap-2 shrink-0">
+                            <input
+                              ref={(el) => {
+                                logoFileRefs.current[logoKey] = el
+                              }}
+                              type="file"
+                              accept="image/jpeg,image/png,image/webp,image/*"
+                              className="hidden"
+                              disabled={logoBusy}
+                              onChange={(e) => {
+                                const f = e.target.files?.[0]
+                                if (f) void uploadLogo('method', m.key, f)
+                              }}
+                            />
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                disabled={logoBusy}
+                                onClick={() => logoFileRef(logoKey).current?.click()}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-600 text-white hover:bg-slate-700 disabled:opacity-50"
+                              >
+                                <Upload size={14} />
+                                {uploadingLogo === logoKey ? 'Subiendo…' : m.logo_url ? 'Cambiar logo' : 'Subir logo'}
+                              </button>
+                              {m.logo_url ? (
+                                <button
+                                  type="button"
+                                  disabled={logoBusy}
+                                  onClick={() => void clearLogo('method', m.key)}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-red-200 text-red-700 hover:bg-red-50 disabled:opacity-50"
+                                >
+                                  <Trash2 size={14} />
+                                  {clearingLogo === logoKey ? 'Quitando…' : 'Quitar logo'}
+                                </button>
+                              ) : null}
+                            </div>
+                          </div>
+                          <div className="flex-1 min-w-[12rem]">
+                            <label className={labelClass}>Datos adicionales (se muestran junto al QR)</label>
+                            <textarea
+                              className={`${inputClass} min-h-[72px] resize-y`}
+                              placeholder={'Ej:\n**Número**: 987654321\n**Titular**: Juan Pérez'}
+                              value={m.extra_info ?? ''}
+                              onChange={(e) => updateMethod(i, { extra_info: e.target.value })}
+                            />
+                            <p className={hintClass}>Envuelve un texto entre **asteriscos** para mostrarlo en negrita.</p>
+                          </div>
+                        </div>
+                      )
+                    })()}
+                  </>
                 ) : (
                   <p className="text-xs text-slate-500 flex items-center gap-1.5">
                     <Banknote size={14} className="shrink-0" />
@@ -692,34 +857,100 @@ export default function SaasBillingSettingsPage() {
             <p className="text-sm text-slate-400 text-center py-6">No hay cuentas configuradas.</p>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-4">
-              {form.bank_accounts.map((b, i) => (
-                <div key={i} className="border border-slate-200 rounded-xl p-4 space-y-3 bg-slate-50/30">
-                  <div className="flex justify-between items-center gap-2">
-                    <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
-                      <input type="checkbox" checked={b.enabled} onChange={(e) => updateBank(i, { enabled: e.target.checked })} />
-                      Cuenta activa
-                    </label>
-                    <button
-                      type="button"
-                      className="text-xs text-red-600 hover:underline"
-                      onClick={() =>
-                        setForm({ ...form, bank_accounts: form.bank_accounts.filter((_, j) => j !== i) })
-                      }
-                    >
-                      Eliminar
-                    </button>
+              {form.bank_accounts.map((b, i) => {
+                const bankId = b.id || String(i)
+                const logoKey = logoKeyFor('bank', bankId)
+                const logoBusy = uploadingLogo === logoKey || clearingLogo === logoKey
+                const logoSrc = logoPreviewSrc(logoKey, b.logo_url ?? '')
+                return (
+                  <div key={bankId} className="border border-slate-200 rounded-xl p-4 space-y-3 bg-slate-50/30">
+                    <div className="flex justify-between items-center gap-2">
+                      <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                        <input type="checkbox" checked={b.enabled} onChange={(e) => updateBank(i, { enabled: e.target.checked })} />
+                        Cuenta activa
+                      </label>
+                      <button
+                        type="button"
+                        className="text-xs text-red-600 hover:underline"
+                        onClick={() =>
+                          setForm({ ...form, bank_accounts: form.bank_accounts.filter((_, j) => j !== i) })
+                        }
+                      >
+                        Eliminar
+                      </button>
+                    </div>
+                    <input className={inputClass} placeholder="Banco" value={b.bank} onChange={(e) => updateBank(i, { bank: e.target.value })} />
+                    <input className={inputClass} placeholder="Titular" value={b.holder} onChange={(e) => updateBank(i, { holder: e.target.value })} />
+                    <input
+                      className={inputClass}
+                      placeholder="Número cuenta"
+                      value={b.account_number}
+                      onChange={(e) => updateBank(i, { account_number: e.target.value })}
+                    />
+                    <input className={inputClass} placeholder="CCI" value={b.cci} onChange={(e) => updateBank(i, { cci: e.target.value })} />
+
+                    {/* Logo del banco + datos adicionales: se muestran junto a los datos de la
+                        cuenta en /subscription. Logo en la misma carpeta storage/saas que los QR. */}
+                    <div className="flex items-start gap-3 pt-1">
+                      {b.logo_url && logoSrc ? (
+                        <img
+                          key={logoSrc}
+                          src={logoSrc}
+                          alt={`Logo ${b.bank || 'banco'}`}
+                          className="h-12 w-12 shrink-0 object-contain border border-slate-100 rounded-lg bg-white"
+                        />
+                      ) : (
+                        <div className="h-12 w-12 shrink-0 flex items-center justify-center border border-dashed border-slate-200 rounded-lg text-[9px] text-slate-400 text-center px-1">
+                          Sin logo
+                        </div>
+                      )}
+                      <div className="flex flex-col gap-1.5 min-w-0">
+                        <input
+                          ref={(el) => {
+                            logoFileRefs.current[logoKey] = el
+                          }}
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp,image/*"
+                          className="hidden"
+                          disabled={logoBusy}
+                          onChange={(e) => {
+                            const f = e.target.files?.[0]
+                            if (f) void uploadLogo('bank', bankId, f)
+                          }}
+                        />
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            disabled={logoBusy}
+                            onClick={() => logoFileRef(logoKey).current?.click()}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-slate-600 text-white hover:bg-slate-700 disabled:opacity-50"
+                          >
+                            <Upload size={12} />
+                            {uploadingLogo === logoKey ? 'Subiendo…' : b.logo_url ? 'Cambiar logo' : 'Subir logo'}
+                          </button>
+                          {b.logo_url ? (
+                            <button
+                              type="button"
+                              disabled={logoBusy}
+                              onClick={() => void clearLogo('bank', bankId)}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium border border-red-200 text-red-700 hover:bg-red-50 disabled:opacity-50"
+                            >
+                              <Trash2 size={12} />
+                              Quitar
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                    <textarea
+                      className={`${inputClass} min-h-[60px] resize-y`}
+                      placeholder={'Datos adicionales (ej. horario, instrucciones). **texto** = negrita'}
+                      value={b.extra_info ?? ''}
+                      onChange={(e) => updateBank(i, { extra_info: e.target.value })}
+                    />
                   </div>
-                  <input className={inputClass} placeholder="Banco" value={b.bank} onChange={(e) => updateBank(i, { bank: e.target.value })} />
-                  <input className={inputClass} placeholder="Titular" value={b.holder} onChange={(e) => updateBank(i, { holder: e.target.value })} />
-                  <input
-                    className={inputClass}
-                    placeholder="Número cuenta"
-                    value={b.account_number}
-                    onChange={(e) => updateBank(i, { account_number: e.target.value })}
-                  />
-                  <input className={inputClass} placeholder="CCI" value={b.cci} onChange={(e) => updateBank(i, { cci: e.target.value })} />
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
           <SectionSaveFooter
