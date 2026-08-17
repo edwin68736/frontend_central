@@ -22,8 +22,13 @@ export interface SaasPayment {
    * pending = registrado por un admin desde este panel.
    * Ambos requieren aprobación; omitir pending_review de esta unión fue lo que impidió
    * que el compilador detectara que los botones de aprobar/rechazar no se renderizaban.
+   * reversed = SE HABÍA aprobado y luego se anuló (ver revert) — deshizo la extensión de
+   * suscripción/ciclo que esa aprobación había producido.
    */
-  status: 'pending' | 'pending_review' | 'approved' | 'rejected'
+  status: 'pending' | 'pending_review' | 'approved' | 'rejected' | 'reversed'
+  reversed_at?: string | null
+  reversed_by?: number | null
+  reversal_reason?: string | null
   /**
    * Plan que el TENANT pidió al enviar este pago (elegir plan / renovar sin billing_cycle
    * previo, ver POST /api/subscription/renewal-request). null cuando el pago es contra un
@@ -99,6 +104,13 @@ export const paymentsService = {
 
   async reject(id: number, adminNotes: string): Promise<void> {
     await api.patch(`/superadmin/payments/${id}/reject`, { admin_notes: adminNotes })
+  },
+
+  /** Anula un pago YA APROBADO: deshace la extensión de suscripción/ciclo que produjo (el ciclo
+   * vuelve a pending, o se borra si esta aprobación lo había creado) para que el tenant pueda
+   * repetir el pago/la renovación desde cero. El pago no se borra, queda 'reversed'. */
+  async revert(id: number, reason: string): Promise<void> {
+    await api.patch(`/superadmin/payments/${id}/revert`, { reason })
   },
 
   /** Adjunta la boleta/factura (PDF) que se le emite al cliente por este pago. */

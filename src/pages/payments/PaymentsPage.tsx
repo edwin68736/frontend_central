@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import { toast } from 'sonner'
-import { Plus, CheckCircle, XCircle, Eye, Upload, FileText, CreditCard, AlertTriangle } from 'lucide-react'
+import { Plus, CheckCircle, XCircle, Eye, Upload, FileText, CreditCard, AlertTriangle, Undo2, Download } from 'lucide-react'
 import { paymentsService, type SaasPayment } from '../../services/payments.service'
 import { plansService, type SaasPlan } from '../../services/plans.service'
 import { tenantsService, type Tenant } from '../../services/tenants.service'
@@ -18,6 +18,9 @@ const STATUS_CONFIG = {
   pending: { label: 'Pendiente', variant: 'yellow' as const },
   approved: { label: 'Aprobado', variant: 'green' as const },
   rejected: { label: 'Rechazado', variant: 'red' as const },
+  // reversed: SE HABÍA aprobado y luego se anuló — ver Revertir. Distinto de "rechazado"
+  // (rejected = nunca llegó a aprobarse).
+  reversed: { label: 'Anulado', variant: 'gray' as const },
 }
 
 /** Estados que aún requieren decisión del administrador. */
@@ -99,8 +102,12 @@ export default function PaymentsPage() {
   const [reviewPlanId, setReviewPlanId] = useState(0)
   const [reviewPeriodMonths, setReviewPeriodMonths] = useState(0)
   const [reviewNotes, setReviewNotes] = useState('')
+  /** Boleta/factura (PDF) que se adjunta en el mismo paso de aprobar — ya no hace falta volver
+   *  a entrar al pago después para subirla. */
+  const [reviewFiscalDoc, setReviewFiscalDoc] = useState<File | null>(null)
   const [saving, setSaving] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
+  const reviewFiscalRef = useRef<HTMLInputElement>(null)
   const [newPaymentForm, setNewPaymentForm] = useState(emptyPaymentForm())
   /** Cobro que se va a anular; abre la confirmación con sus advertencias. */
   const [cancelTarget, setCancelTarget] = useState<SaasInvoice | null>(null)
@@ -112,6 +119,9 @@ export default function PaymentsPage() {
   const [invoiceFilter, setInvoiceFilter] = useState('')
   /** Pago al que se le va a adjuntar la boleta/factura. */
   const [fiscalTarget, setFiscalTarget] = useState<SaasPayment | null>(null)
+  /** Pago aprobado que se va a anular (deshace la extensión de suscripción/ciclo que produjo). */
+  const [revertTarget, setRevertTarget] = useState<SaasPayment | null>(null)
+  const [revertReason, setRevertReason] = useState('')
   const fiscalFileRef = useRef<HTMLInputElement>(null)
   const [showInvoiceModal, setShowInvoiceModal] = useState(false)
   const [invoiceForm, setInvoiceForm] = useState(emptyInvoiceForm())
@@ -305,6 +315,7 @@ export default function PaymentsPage() {
     setSelectedPayment(payment)
     setReviewAction(action)
     setReviewNotes('')
+    setReviewFiscalDoc(null)
     // Preseleccionar el plan que el tenant pidió (solicitud de renovación/cambio de plan sin
     // billing_cycle previo): aprobar sin tocar el dropdown debe respetar lo que pidió, no
     // quedarse callado con el plan viejo. El admin sigue pudiendo cambiarlo antes de confirmar.
@@ -322,7 +333,20 @@ export default function PaymentsPage() {
     try {
       if (reviewAction === 'approve') {
         await paymentsService.approve(selectedPayment.id, reviewPlanId, reviewNotes, reviewPeriodMonths)
-        toast.success('Pago aprobado — suscripción actualizada')
+        // La boleta/factura es un paso aparte (adjunta un archivo, la aprobación no) — si falla,
+        // el pago ya quedó aprobado igual: se avisa distinto para que quede claro que falta
+        // reintentar el PDF, no repetir la aprobación. El botón «Adjuntar comprobante» de la
+        // lista sigue disponible para ese reintento.
+        if (reviewFiscalDoc) {
+          try {
+            await paymentsService.uploadFiscalDoc(selectedPayment.id, reviewFiscalDoc)
+            toast.success('Pago aprobado y comprobante adjuntado')
+          } catch {
+            toast.error('El pago se aprobó, pero el comprobante no se pudo adjuntar — reinténtalo desde la lista')
+          }
+        } else {
+          toast.success('Pago aprobado — suscripción actualizada')
+        }
       } else {
         await paymentsService.reject(selectedPayment.id, reviewNotes)
         toast.success('Pago rechazado')
@@ -332,6 +356,26 @@ export default function PaymentsPage() {
     } catch (e: any) {
       toast.error(e.response?.data?.error ?? 'Error procesando pago')
     } finally { setSaving(false) }
+  }
+
+  const handleRevert = async () => {
+    if (!revertTarget) return
+    if (!revertReason.trim()) {
+      toast.error('Indica el motivo de la anulación')
+      return
+    }
+    setSaving(true)
+    try {
+      await paymentsService.revert(revertTarget.id, revertReason.trim())
+      toast.success('Pago anulado — la suscripción y el cobro volvieron a como estaban antes')
+      setRevertTarget(null)
+      setRevertReason('')
+      load()
+    } catch (e: any) {
+      toast.error(e.response?.data?.error ?? 'No se pudo anular el pago')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const getTenantName = (id: number) => tenants.find(t => t.id === id)?.name ?? `Tenant #${id}`
@@ -385,7 +429,7 @@ export default function PaymentsPage() {
 
       {tab === 'payments' ? (
         <div className="flex gap-2">
-          {(['pending', 'approved', 'rejected', ''] as const).map(s => (
+          {(['pending', 'approved', 'rejected', 'reversed', ''] as const).map(s => (
             <button
               key={s}
               onClick={() => setFilterStatus(s)}
@@ -551,19 +595,21 @@ export default function PaymentsPage() {
                         </button>
                       </div>
                     )}
-                    {/* Solo tras aprobar: es el comprobante que se le entrega al cliente
-                        por el pago, y él lo descarga desde su panel. */}
+                    {/* Solo tras aprobar: es el comprobante que se le entrega al cliente por el
+                        pago. Ya se adjunta al aprobar (ver modal de revisión) — el botón de
+                        subir acá queda solo como respaldo, para lo que se apruebe sin adjuntarlo
+                        ahí, o quedó aprobado antes de que existiera ese paso. */}
                     {p.status === 'approved' && (
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         {p.fiscal_doc_url ? (
                           <a
                             href={saasAssetUrl(p.fiscal_doc_url)}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="inline-flex items-center gap-1 text-xs text-emerald-700 hover:underline"
-                            title="Ver comprobante entregado"
+                            title="Descargar el comprobante entregado al cliente"
                           >
-                            <FileText size={14} /> Comprobante
+                            <Download size={14} /> Descargar comprobante
                           </a>
                         ) : (
                           <button
@@ -574,6 +620,18 @@ export default function PaymentsPage() {
                             <Upload size={14} /> Adjuntar comprobante
                           </button>
                         )}
+                        <button
+                          onClick={() => { setRevertTarget(p); setRevertReason('') }}
+                          className="inline-flex items-center gap-1 text-xs text-amber-700 hover:underline"
+                          title="Anular: deshace la extensión de suscripción/ciclo que este pago produjo"
+                        >
+                          <Undo2 size={14} /> Revertir
+                        </button>
+                      </div>
+                    )}
+                    {p.status === 'reversed' && p.reversal_reason && (
+                      <div className="text-xs text-slate-500 max-w-xs truncate" title={p.reversal_reason}>
+                        Motivo: {p.reversal_reason}
                       </div>
                     )}
                   </td>
@@ -846,6 +904,36 @@ export default function PaymentsPage() {
                   placeholder="0 = usar lo que ya venga calculado"
                 />
               </div>
+              {/* Antes esto solo se podía subir DESPUÉS de aprobar, volviendo a entrar al pago
+                  desde la lista — ahora se adjunta en el mismo paso. Sigue siendo opcional: si
+                  no está lista todavía, el botón «Adjuntar comprobante» de la lista permite
+                  subirla después. */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Boleta/factura para el cliente (PDF, opcional)
+                </label>
+                <div
+                  className="border-2 border-dashed border-slate-200 rounded-lg p-3 text-center cursor-pointer hover:border-indigo-400 hover:bg-indigo-50/30 transition-colors"
+                  onClick={() => reviewFiscalRef.current?.click()}
+                >
+                  <input
+                    ref={reviewFiscalRef}
+                    type="file"
+                    accept=".pdf"
+                    className="hidden"
+                    onChange={e => setReviewFiscalDoc(e.target.files?.[0] ?? null)}
+                  />
+                  {reviewFiscalDoc ? (
+                    <div className="flex items-center justify-center gap-2 text-indigo-600 text-sm font-medium">
+                      <FileText size={14} /> {reviewFiscalDoc.name}
+                    </div>
+                  ) : (
+                    <div className="text-slate-500 text-sm flex items-center justify-center gap-1.5">
+                      <Upload size={14} /> Clic para adjuntar el PDF
+                    </div>
+                  )}
+                </div>
+              </div>
             </>
           )}
 
@@ -908,6 +996,75 @@ export default function PaymentsPage() {
             >
               {selectedPayment.receipt_url}
             </a>
+          </div>
+        )}
+      </Modal>
+
+      {/* Modal revertir pago aprobado */}
+      <Modal
+        open={Boolean(revertTarget)}
+        onClose={() => !saving && setRevertTarget(null)}
+        title="Anular pago aprobado"
+      >
+        {revertTarget && (
+          <div className="space-y-4">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm space-y-1">
+              <div className="flex justify-between">
+                <span className="text-slate-500">Empresa</span>
+                <span className="font-medium text-slate-800">
+                  {revertTarget.tenant_name || getTenantName(revertTarget.tenant_id)}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Monto</span>
+                <span className="font-semibold text-slate-800">
+                  {revertTarget.currency} {revertTarget.amount.toFixed(2)}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-900">
+              <AlertTriangle className="shrink-0 mt-0.5" size={18} />
+              <div>
+                <p className="font-medium">Esto deshace la aprobación, no borra el pago</p>
+                <p className="text-xs mt-0.5">
+                  La suscripción vuelve al vencimiento que tenía antes de este pago, y el cobro que
+                  este pago cerró vuelve a quedar pendiente (o se elimina, si este pago lo había
+                  generado) — la empresa podrá repetir el pago/la renovación desde cero. Solo se
+                  puede anular el <strong>último</strong> pago aprobado de la empresa.
+                </p>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Motivo de la anulación *</label>
+              <textarea
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-slate-800 text-sm bg-white resize-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                rows={2}
+                value={revertReason}
+                onChange={e => setRevertReason(e.target.value)}
+                placeholder="Ej: pago duplicado, la empresa pagó dos veces la misma renovación"
+              />
+            </div>
+
+            <div className="flex gap-3 pt-1">
+              <button
+                type="button"
+                onClick={() => setRevertTarget(null)}
+                disabled={saving}
+                className="flex-1 px-4 py-2 border border-slate-300 text-slate-700 rounded-lg text-sm hover:bg-slate-50 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleRevert}
+                disabled={saving}
+                className="flex-1 px-4 py-2 bg-amber-600 text-white rounded-lg text-sm hover:bg-amber-700 disabled:opacity-50"
+              >
+                {saving ? 'Anulando...' : 'Anular pago'}
+              </button>
+            </div>
           </div>
         )}
       </Modal>
