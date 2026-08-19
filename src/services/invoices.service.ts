@@ -1,4 +1,16 @@
 import { api } from './api'
+import type { PagedResult } from './payments.service'
+
+export interface InvoiceListParams {
+  status?: string
+  /** Busca por nombre de empresa, RUC o subdominio (mismo criterio que Pagos/Suscripciones). */
+  q?: string
+  /** AAAA-MM-DD, inclusive. Filtra por vencimiento del cobro (due_date). */
+  date_from?: string
+  date_to?: string
+  page?: number
+  per_page?: number
+}
 
 /** Cobro emitido a un tenant (saas_billing_cycles). */
 export interface SaasInvoice {
@@ -6,6 +18,7 @@ export interface SaasInvoice {
   tenant_id: number
   /** Solo presente en el listado global de cobros. */
   tenant_name?: string
+  tenant_ruc?: string
   period_start: string
   period_end: string
   due_date: string
@@ -56,11 +69,15 @@ export interface IssueRenewalInput {
 
 export const invoicesService = {
   /** Cobros de todas las empresas. Sin status: solo los que siguen por cobrar. */
-  list: async (status = ''): Promise<SaasInvoice[]> => {
-    const { data } = await api.get<{ data: SaasInvoice[] }>('/superadmin/billing-cycles', {
-      params: status ? { status } : undefined,
-    })
-    return data.data ?? []
+  list: async (params: InvoiceListParams = {}): Promise<PagedResult<SaasInvoice>> => {
+    const { data } = await api.get('/superadmin/billing-cycles', { params })
+    return {
+      data: data.data ?? [],
+      page: data.page ?? 1,
+      per_page: data.per_page ?? 25,
+      total: data.total ?? 0,
+      total_pages: data.total_pages ?? 0,
+    }
   },
 
   listByTenant: async (tenantId: number): Promise<SaasInvoice[]> => {

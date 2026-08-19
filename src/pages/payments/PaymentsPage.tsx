@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import { toast } from 'sonner'
-import { Plus, CheckCircle, XCircle, Eye, Upload, FileText, CreditCard, AlertTriangle, Undo2, Download } from 'lucide-react'
+import { Plus, CheckCircle, XCircle, Eye, Upload, FileText, CreditCard, AlertTriangle, Undo2, Download, Search, ChevronLeft, ChevronRight, X as XIcon } from 'lucide-react'
 import { paymentsService, type SaasPayment } from '../../services/payments.service'
 import { plansService, type SaasPlan } from '../../services/plans.service'
 import { tenantsService, type Tenant } from '../../services/tenants.service'
@@ -10,6 +10,52 @@ import Badge from '../../components/ui/Badge'
 import TenantSearchSelect from '../../components/TenantSearchSelect'
 import { invoicesService, type SaasInvoice, type RenewalPreview } from '../../services/invoices.service'
 import { saasAssetUrl } from '../../services/saasSettings.service'
+
+const PER_PAGE = 25
+
+/** Barra de paginación compacta: página actual, total, prev/next. Se deshabilita sola en los
+ *  bordes (no hay página 0 ni una después de la última). */
+function PaginationBar({
+  page,
+  totalPages,
+  total,
+  onChange,
+}: {
+  page: number
+  totalPages: number
+  total: number
+  onChange: (page: number) => void
+}) {
+  if (total === 0) return null
+  return (
+    <div className="flex items-center justify-between gap-3 px-4 py-3 border-t border-slate-100 bg-slate-50/60">
+      <p className="text-xs text-slate-500">
+        {total} resultado{total === 1 ? '' : 's'}
+        {totalPages > 1 && ` · página ${page} de ${totalPages}`}
+      </p>
+      {totalPages > 1 && (
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => onChange(page - 1)}
+            disabled={page <= 1}
+            className="p-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            title="Anterior"
+          >
+            <ChevronLeft size={14} />
+          </button>
+          <button
+            onClick={() => onChange(page + 1)}
+            disabled={page >= totalPages}
+            className="p-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            title="Siguiente"
+          >
+            <ChevronRight size={14} />
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
 
 const STATUS_CONFIG = {
   // pending_review: lo envía el tenant con su comprobante. Es el caso más frecuente y el
@@ -133,6 +179,29 @@ export default function PaymentsPage() {
   const [tenantInvoices, setTenantInvoices] = useState<SaasInvoice[]>([])
   const [preview, setPreview] = useState<RenewalPreview | null>(null)
   const [previewError, setPreviewError] = useState('')
+
+  /** Búsqueda y rango de fechas: comparten la misma barra de filtros y se aplican a los dos
+   *  listados (pagos recibidos y cobros emitidos), cada uno con su propia paginación. */
+  const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+  const [paymentsPage, setPaymentsPage] = useState(1)
+  const [paymentsTotal, setPaymentsTotal] = useState(0)
+  const [paymentsTotalPages, setPaymentsTotalPages] = useState(0)
+  const [invoicesPage, setInvoicesPage] = useState(1)
+  const [invoicesTotal, setInvoicesTotal] = useState(0)
+  const [invoicesTotalPages, setInvoicesTotalPages] = useState(0)
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 400)
+    return () => clearTimeout(t)
+  }, [search])
+
+  // Cambiar cualquier filtro vuelve a la página 1 — quedarse en la página 4 de un resultado
+  // que ahora tiene 1 sola página mostraría una lista vacía sin explicación.
+  useEffect(() => { setPaymentsPage(1) }, [filterStatus, debouncedSearch, dateFrom, dateTo])
+  useEffect(() => { setInvoicesPage(1) }, [invoiceFilter, debouncedSearch, dateFrom, dateTo])
 
   useEffect(() => {
     if (!showInvoiceModal || !invoiceForm.tenant_id) {
@@ -261,20 +330,30 @@ export default function PaymentsPage() {
     setLoading(true)
     try {
       const [p, pl, t, inv] = await Promise.all([
-        paymentsService.list(filterStatus),
+        paymentsService.list({
+          status: filterStatus, q: debouncedSearch, date_from: dateFrom, date_to: dateTo,
+          page: paymentsPage, per_page: PER_PAGE,
+        }),
         plansService.list(),
         tenantsService.list({ page: 1, per_page: 100 }),
-        invoicesService.list(invoiceFilter),
+        invoicesService.list({
+          status: invoiceFilter, q: debouncedSearch, date_from: dateFrom, date_to: dateTo,
+          page: invoicesPage, per_page: PER_PAGE,
+        }),
       ])
-      setPayments(p)
+      setPayments(p.data)
+      setPaymentsTotal(p.total)
+      setPaymentsTotalPages(p.total_pages)
       setPlans(pl.filter(p => p.active))
       setTenants(t.data)
-      setIssuedInvoices(inv)
+      setIssuedInvoices(inv.data)
+      setInvoicesTotal(inv.total)
+      setInvoicesTotalPages(inv.total_pages)
     } catch { toast.error('Error cargando pagos') }
     finally { setLoading(false) }
   }
 
-  useEffect(() => { load() }, [filterStatus, invoiceFilter])
+  useEffect(() => { load() }, [filterStatus, invoiceFilter, debouncedSearch, dateFrom, dateTo, paymentsPage, invoicesPage])
 
   // Cobros por cancelar de la empresa elegida en el registro manual.
   useEffect(() => {
@@ -431,6 +510,57 @@ export default function PaymentsPage() {
         ))}
       </div>
 
+      {/* Búsqueda y rango de fechas: aplican a los dos listados (empresa/RUC busca en ambos;
+          el rango filtra por fecha del pago en "Pagos recibidos" y por vencimiento del cobro
+          en "Cobros emitidos" — cada uno según la fecha que ya muestra su tabla). */}
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="relative flex-1 min-w-[220px]">
+          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            type="text"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Buscar por empresa o RUC…"
+            className="w-full pl-9 pr-8 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+          />
+          {search && (
+            <button
+              onClick={() => setSearch('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+              title="Limpiar búsqueda"
+            >
+              <XIcon size={14} />
+            </button>
+          )}
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-slate-500 mb-1">Desde</label>
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={e => setDateFrom(e.target.value)}
+            className="border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-slate-500 mb-1">Hasta</label>
+          <input
+            type="date"
+            value={dateTo}
+            onChange={e => setDateTo(e.target.value)}
+            className="border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+          />
+        </div>
+        {(search || dateFrom || dateTo) && (
+          <button
+            onClick={() => { setSearch(''); setDateFrom(''); setDateTo('') }}
+            className="px-3 py-2 text-xs font-medium text-slate-500 hover:text-slate-700"
+          >
+            Limpiar filtros
+          </button>
+        )}
+      </div>
+
       {tab === 'payments' ? (
         <div className="flex gap-2">
           {(['pending', 'approved', 'rejected', 'reversed', ''] as const).map(s => (
@@ -478,8 +608,9 @@ export default function PaymentsPage() {
                   const cfg = INVOICE_STATUS_CONFIG[inv.status] ?? { label: inv.status, variant: 'gray' as const }
                   return (
                     <tr key={inv.id} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
-                      <td className="px-4 py-3 font-medium text-slate-800">
-                        {inv.tenant_name || `Empresa #${inv.tenant_id}`}
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-slate-800">{inv.tenant_name || `Empresa #${inv.tenant_id}`}</div>
+                        {inv.tenant_ruc && <div className="text-xs text-slate-400">{inv.tenant_ruc}</div>}
                       </td>
                       <td className="px-4 py-3 text-slate-600 text-xs">
                         {fmtDay(inv.period_start)} → {fmtDay(inv.period_end)}
@@ -523,6 +654,12 @@ export default function PaymentsPage() {
               </p>
             </div>
           )}
+          <PaginationBar
+            page={invoicesPage}
+            totalPages={invoicesTotalPages}
+            total={invoicesTotal}
+            onChange={setInvoicesPage}
+          />
         </div>
       )}
 
@@ -548,6 +685,7 @@ export default function PaymentsPage() {
                 <tr key={p.id} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
                   <td className="px-4 py-3">
                     <div className="font-medium text-slate-800">{p.tenant_name || getTenantName(p.tenant_id)}</div>
+                    {p.tenant_ruc && <div className="text-xs text-slate-400">{p.tenant_ruc}</div>}
                     {p.notes && <div className="text-xs text-slate-500 truncate max-w-xs">{p.notes}</div>}
                   </td>
                   <td className="px-4 py-3 font-semibold text-slate-800">
@@ -647,6 +785,12 @@ export default function PaymentsPage() {
         {payments.length === 0 && (
           <div className="text-center py-12 text-slate-500">No hay pagos en este estado</div>
         )}
+        <PaginationBar
+          page={paymentsPage}
+          totalPages={paymentsTotalPages}
+          total={paymentsTotal}
+          onChange={setPaymentsPage}
+        />
       </div>
       )}
 

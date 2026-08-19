@@ -1,10 +1,30 @@
 import { api } from './api'
 
+export interface PagedResult<T> {
+  data: T[]
+  page: number
+  per_page: number
+  total: number
+  total_pages: number
+}
+
+export interface PaymentListParams {
+  status?: string
+  /** Busca por nombre de empresa, RUC o subdominio (mismo criterio que Suscripciones). */
+  q?: string
+  /** AAAA-MM-DD, inclusive. Filtra por cuándo se registró/envió el pago (created_at). */
+  date_from?: string
+  date_to?: string
+  page?: number
+  per_page?: number
+}
+
 export interface SaasPayment {
   id: number
   tenant_id: number
   tenant_name: string
   tenant_slug: string
+  tenant_ruc?: string
   subscription_id: number | null
   amount: number
   currency: string
@@ -75,9 +95,15 @@ export const paymentsService = {
     return r.data
   },
 
-  async list(status = ''): Promise<SaasPayment[]> {
-    const r = await api.get('/superadmin/payments', { params: { status } })
-    return r.data.data ?? []
+  async list(params: PaymentListParams = {}): Promise<PagedResult<SaasPayment>> {
+    const r = await api.get('/superadmin/payments', { params })
+    return {
+      data: r.data.data ?? [],
+      page: r.data.page ?? 1,
+      per_page: r.data.per_page ?? 25,
+      total: r.data.total ?? 0,
+      total_pages: r.data.total_pages ?? 0,
+    }
   },
 
   async get(id: number): Promise<SaasPayment> {
