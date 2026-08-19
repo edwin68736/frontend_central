@@ -22,6 +22,7 @@ import {
 import { consultaService } from '@/services/consulta.service'
 import { plansService, type SaasPlan, type SaasModule } from '@/services/plans.service'
 import { paymentsService } from '@/services/payments.service'
+import { saasSettingsService, type PaymentMethodConfig } from '@/services/saasSettings.service'
 import { subscriptionsService, type SaasSubscription } from '@/services/subscriptions.service'
 import { getRootDomain, getTenantHost, resolveTenantUrl, buildMasterAccessUrl } from '@/utils/tenantUrl'
 import { fileToBase64Binary, fileToBase64Text } from '@/utils/fileBase64'
@@ -477,7 +478,21 @@ export default function TenantsPage() {
   // Cobro en el mismo paso del alta. Opcional: apagado, la empresa se crea igual.
   const [payNow, setPayNow] = useState(false)
   const [payAmount, setPayAmount] = useState(0)
-  const [payMethod, setPayMethod] = useState('transfer')
+  const [payMethod, setPayMethod] = useState('')
+  // Métodos de pago tal como los configuró el superadmin (los mismos que ve el tenant al subir
+  // su comprobante en su panel, ver PaymentMethodsPanel) — nada de opciones hardcodeadas que
+  // puedan no coincidir con lo que realmente está habilitado.
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethodConfig[]>([])
+  useEffect(() => {
+    saasSettingsService
+      .get()
+      .then(cfg => {
+        const enabled = cfg.payment_methods.filter(m => m.enabled)
+        setPaymentMethods(enabled)
+        setPayMethod(prev => prev || enabled[0]?.key || '')
+      })
+      .catch(() => {})
+  }, [])
   const [payReference, setPayReference] = useState('')
   const [payReceipt, setPayReceipt] = useState<File | null>(null)
 
@@ -1458,13 +1473,23 @@ export default function TenantsPage() {
                         className={inputClass}
                         value={payMethod}
                         onChange={e => setPayMethod(e.target.value)}
+                        disabled={paymentMethods.length === 0}
                       >
-                        <option value="transfer">Transferencia</option>
-                        <option value="deposit">Depósito</option>
-                        <option value="yape">Yape</option>
-                        <option value="plin">Plin</option>
-                        <option value="cash">Efectivo</option>
+                        {paymentMethods.length === 0 ? (
+                          <option value="">Sin métodos configurados</option>
+                        ) : (
+                          paymentMethods.map(m => (
+                            <option key={m.key} value={m.key}>
+                              {m.label}
+                            </option>
+                          ))
+                        )}
                       </select>
+                      {paymentMethods.length === 0 && (
+                        <p className="text-[11px] text-amber-700 mt-1">
+                          No hay métodos de pago habilitados — configúralos en Configuración SaaS.
+                        </p>
+                      )}
                     </div>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

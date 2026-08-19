@@ -9,7 +9,7 @@ import Spinner from '../../components/ui/Spinner'
 import Badge from '../../components/ui/Badge'
 import TenantSearchSelect from '../../components/TenantSearchSelect'
 import { invoicesService, type SaasInvoice, type RenewalPreview } from '../../services/invoices.service'
-import { saasAssetUrl } from '../../services/saasSettings.service'
+import { saasAssetUrl, saasSettingsService, type PaymentMethodConfig } from '../../services/saasSettings.service'
 
 const PER_PAGE = 25
 
@@ -96,7 +96,10 @@ function emptyPaymentForm() {
     period_months: 1,
     notes: '',
     file: null as File | null,
-    payment_method: 'efectivo',
+    // Vacío a propósito: se completa con el primer método configurado y habilitado (ver el
+    // efecto que carga paymentMethods) — nada de un valor hardcodeado que pueda no existir en
+    // la configuración real.
+    payment_method: '',
     billing_cycle_id: 0,
   }
 }
@@ -192,6 +195,25 @@ export default function PaymentsPage() {
   const [invoicesPage, setInvoicesPage] = useState(1)
   const [invoicesTotal, setInvoicesTotal] = useState(0)
   const [invoicesTotalPages, setInvoicesTotalPages] = useState(0)
+
+  // Métodos de pago tal como los configuró el superadmin (los mismos que ve el tenant al subir
+  // su comprobante en su panel) — nada de opciones hardcodeadas ("efectivo", "yape"…) que
+  // puedan no coincidir con lo que realmente está habilitado.
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethodConfig[]>([])
+  useEffect(() => {
+    saasSettingsService
+      .get()
+      .then(cfg => setPaymentMethods(cfg.payment_methods.filter(m => m.enabled)))
+      .catch(() => {})
+  }, [])
+  // Respaldo si el modal ya estaba abierto cuando terminó de cargar la config (carrera poco
+  // probable, pero sin esto el select quedaba sin selección).
+  useEffect(() => {
+    if (showCreateModal && !newPaymentForm.payment_method && paymentMethods[0]) {
+      setNewPaymentForm(f => ({ ...f, payment_method: paymentMethods[0].key }))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paymentMethods, showCreateModal])
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search.trim()), 400)
@@ -292,6 +314,7 @@ export default function PaymentsPage() {
   const handlePayInvoice = (inv: SaasInvoice) => {
     setNewPaymentForm({
       ...emptyPaymentForm(),
+      payment_method: paymentMethods[0]?.key ?? '',
       tenant_id: inv.tenant_id,
       billing_cycle_id: inv.id,
       amount: String(inv.amount),
@@ -483,7 +506,7 @@ export default function PaymentsPage() {
             <FileText size={16} /> Emitir cobro
           </button>
           <button
-            onClick={() => { setNewPaymentForm({ tenant_id: 0, amount: '', currency: 'PEN', period_months: 1, notes: '', file: null, payment_method: 'efectivo', billing_cycle_id: 0 }); setShowCreateModal(true) }}
+            onClick={() => { setNewPaymentForm({ ...emptyPaymentForm(), payment_method: paymentMethods[0]?.key ?? '' }); setShowCreateModal(true) }}
             className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium transition-colors"
           >
             <Plus size={16} /> Registrar pago
@@ -925,14 +948,23 @@ export default function PaymentsPage() {
                 className="w-full border border-slate-300 rounded-lg px-3 py-2 text-slate-800 text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                 value={newPaymentForm.payment_method}
                 onChange={e => setNewPaymentForm(f => ({ ...f, payment_method: e.target.value }))}
+                disabled={paymentMethods.length === 0}
               >
-                <option value="efectivo">Efectivo</option>
-                <option value="transferencia">Transferencia</option>
-                <option value="yape">Yape</option>
-                <option value="plin">Plin</option>
-                <option value="deposito">Depósito</option>
-                <option value="otro">Otro</option>
+                {paymentMethods.length === 0 ? (
+                  <option value="">Sin métodos configurados</option>
+                ) : (
+                  paymentMethods.map(m => (
+                    <option key={m.key} value={m.key}>
+                      {m.label}
+                    </option>
+                  ))
+                )}
               </select>
+              {paymentMethods.length === 0 && (
+                <p className="text-xs text-amber-700 mt-1">
+                  No hay métodos de pago habilitados — configúralos en Configuración SaaS.
+                </p>
+              )}
             </div>
           </div>
 
