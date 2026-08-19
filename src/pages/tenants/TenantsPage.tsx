@@ -204,9 +204,10 @@ const createSchema = z.object({
   admin_password: z.string().min(6, 'Mínimo 6 caracteres'),
   address: z.string().optional(),
   ubigeo: z.string().optional(),
-  // Toda empresa nace con suscripción (las gratuitas, con el plan gratis), así que el mínimo
-  // es 1 mes: antes admitía 0 y el texto prometía «solo empresa», que nunca se implementó.
-  subscription_months: z.number().min(1).max(120).optional(),
+  // Toda empresa nace con suscripción (las gratuitas, con el plan gratis). Restringido a los
+  // mismos 4 ciclos fijos del plan (1/3/6/12 meses, ver saas.FixedPlanCycleMonths) — son los
+  // únicos que pueden traer descuento configurado; fuera de estos no hay nada que aplicar.
+  subscription_months: z.union([z.literal(1), z.literal(3), z.literal(6), z.literal(12)]).optional(),
   // Vacío = arranca hoy (default de siempre). Si se elige, no puede ser una fecha pasada — el
   // backend vuelve a validar esto igual, nunca confiar solo en el frontend.
   start_date: z
@@ -1320,14 +1321,28 @@ export default function TenantsPage() {
               </p>
             </FormField>
             <FormField label="Duración suscripción (meses)" error={createForm.formState.errors.subscription_months?.message}>
-              <input
-                type="number"
-                min={1}
-                max={120}
-                {...createForm.register('subscription_months', { valueAsNumber: true })}
-                className={inputClass}
-                placeholder="1"
-              />
+              {/* Los mismos 4 ciclos fijos del autoservicio del tenant (1/3/6/12 meses) — son
+                  los únicos que pueden traer descuento configurado en el plan (ver Planes), así
+                  que fuera de estos cuatro no hay nada que aplicar. */}
+              <select {...createForm.register('subscription_months', { valueAsNumber: true })} className={inputClass}>
+                {[1, 3, 6, 12].map(m => {
+                  const plan = saasPlans.find(p => p.name.toLowerCase() === (createPlanValue ?? '').toLowerCase())
+                  const cycle = plan?.cycles.find(c => c.months === m && c.enabled)
+                  const discountLabel = cycle
+                    ? cycle.discount_type === 'percent'
+                      ? ` — ${cycle.discount_value}% dto.`
+                      : cycle.discount_value > 0
+                        ? ` — S/ ${cycle.discount_value.toFixed(2)} dto.`
+                        : ''
+                    : ''
+                  return (
+                    <option key={m} value={m}>
+                      {m === 1 ? '1 mes' : `${m} meses`}
+                      {discountLabel}
+                    </option>
+                  )
+                })}
+              </select>
               <p className="text-xs text-slate-500 mt-1">
                 Se creará la suscripción con el plan elegido y se emitirá su cobro por ese período.
               </p>
