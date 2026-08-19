@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { useForm } from 'react-hook-form'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { z } from 'zod'
@@ -6,6 +6,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { toast } from 'sonner'
 import {
   Plus, Search, RefreshCw, Edit, Power, Layers, ChevronDown, Shield, SearchCheck, Trash2, AlertTriangle, LogIn, Loader2,
+  Upload,
 } from 'lucide-react'
 import {
   tenantsService,
@@ -480,6 +481,8 @@ export default function TenantsPage() {
   const [payReference, setPayReference] = useState('')
   const [payReceipt, setPayReceipt] = useState<File | null>(null)
 
+  const payReceiptRef = useRef<HTMLInputElement>(null)
+
   const resetPaymentFields = () => {
     setPayNow(false)
     setPayAmount(0)
@@ -527,6 +530,16 @@ export default function TenantsPage() {
     const gross = plan ? +(plan.price * months).toFixed(2) : 0
     return { gross, discount: 0, net: gross, discountType: '' as const, discountValue: 0, hasConfiguredCycle: false }
   }, [saasPlans, createPlanValue, createMonths])
+  // El monto de "Registrar el pago ahora" sigue al cobro real del plan+meses elegidos — si el
+  // admin cambia la duración (o el plan) con el pago ya marcado, el monto se recalcula solo en
+  // vez de quedarse con el de la duración anterior (que el backend rechazaría por no cubrir la
+  // deuda). Solo se dispara cuando el cobro CAMBIA, así que si el admin lo edita a mano por
+  // alguna razón, no se lo pisa en cada render — solo al cambiar meses/plan de nuevo.
+  useEffect(() => {
+    if (payNow) setPayAmount(createChargePreview.net)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [payNow, createChargePreview.net])
+
   const createRubroValue = createForm.watch('rubro')
 
   const createPlanPreview = useMemo(() => {
@@ -1407,10 +1420,7 @@ export default function TenantsPage() {
                   type="checkbox"
                   className="mt-0.5 shrink-0"
                   checked={payNow}
-                  onChange={e => {
-                    setPayNow(e.target.checked)
-                    if (e.target.checked) setPayAmount(createChargePreview.net)
-                  }}
+                  onChange={e => setPayNow(e.target.checked)}
                 />
                 <span>
                   <span className="text-sm font-medium text-slate-700">Registrar el pago ahora</span>
@@ -1471,16 +1481,39 @@ export default function TenantsPage() {
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-slate-600 mb-1">
-                        Comprobante (opcional)
+                        Comprobante del pago (opcional)
                       </label>
-                      <input
-                        type="file"
-                        accept=".jpg,.jpeg,.png,.pdf,.webp"
-                        className="w-full text-xs text-slate-600"
-                        onChange={e => setPayReceipt(e.target.files?.[0] ?? null)}
-                      />
+                      <div
+                        onClick={() => payReceiptRef.current?.click()}
+                        className="border-2 border-dashed border-slate-200 rounded-lg p-3 text-center cursor-pointer hover:border-indigo-400 hover:bg-indigo-50/30 transition-colors"
+                      >
+                        <input
+                          ref={payReceiptRef}
+                          type="file"
+                          accept=".jpg,.jpeg,.png,.pdf,.webp"
+                          className="hidden"
+                          onChange={e => setPayReceipt(e.target.files?.[0] ?? null)}
+                        />
+                        {payReceipt ? (
+                          <div className="flex items-center justify-center gap-2 text-indigo-600 text-xs font-medium">
+                            <Upload size={13} /> {payReceipt.name}
+                          </div>
+                        ) : (
+                          <div className="text-slate-500 text-xs flex items-center justify-center gap-1.5">
+                            <Upload size={13} /> Clic para subir el voucher/captura del pago
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
+                  {/* El comprobante de acá es lo que el tenant/admin presenta como prueba de
+                      pago (voucher, captura de yape, etc.) — la boleta/factura en PDF que se
+                      le ENTREGA al tenant por este pago se adjunta después, desde el listado
+                      de Pagos («Adjuntar comprobante» sobre el pago ya aprobado). */}
+                  <p className="text-[11px] text-slate-400">
+                    Después de crear la empresa, no olvides adjuntar la boleta/factura en PDF
+                    para el tenant desde <strong>Pagos</strong>.
+                  </p>
                 </div>
               )}
             </div>

@@ -714,7 +714,20 @@ export default function PaymentsPage() {
                     )}
                   </td>
                   <td className="px-4 py-3">
-                    <Badge variant={cfg.variant as 'green' | 'red' | 'yellow' | 'blue' | 'gray'}>{cfg.label}</Badge>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <Badge variant={cfg.variant as 'green' | 'red' | 'yellow' | 'blue' | 'gray'}>{cfg.label}</Badge>
+                      {/* Todo pago aprobado necesita su boleta/factura en PDF para el tenant —
+                          esta insignia lo marca a simple vista en la columna Estado, en vez de
+                          depender de que se note el enlace chico de la columna de acciones. */}
+                      {p.status === 'approved' && !p.fiscal_doc_url && (
+                        <span
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800"
+                          title="Falta adjuntar la boleta/factura en PDF para entregarle al tenant"
+                        >
+                          <AlertTriangle size={10} /> Falta PDF
+                        </span>
+                      )}
+                    </div>
                     {p.admin_notes && <div className="text-xs text-slate-500 mt-0.5 truncate max-w-xs">{p.admin_notes}</div>}
                   </td>
                   <td className="px-4 py-3 text-slate-500 text-xs">{fmtDate(p.created_at)}</td>
