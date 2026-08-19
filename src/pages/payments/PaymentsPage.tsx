@@ -29,6 +29,10 @@ const REVIEWABLE_STATUSES = ['pending', 'pending_review']
 const INVOICE_STATUS_CONFIG: Record<string, { label: string; variant: 'green' | 'red' | 'yellow' | 'gray' }> = {
   pending: { label: 'Por cobrar', variant: 'yellow' },
   overdue: { label: 'Vencido', variant: 'red' },
+  // pending_review: el tenant ya subió un comprobante para este ciclo (ver saas_models.go:
+  // SaasInvoicePendingReview) — sigue por cobrar, solo que ya hay algo esperando aprobación en
+  // "Pagos recibidos". Anularlo desde acá rechaza ese comprobante en cascada.
+  pending_review: { label: 'Por validar', variant: 'yellow' },
   paid: { label: 'Pagado', variant: 'green' },
   rejected: { label: 'Anulado', variant: 'gray' },
 }
