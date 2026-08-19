@@ -72,9 +72,10 @@ export interface CreateTenantInput {
    * hoy o futura). Útil cuando se registra la empresa hoy pero recién va a operar/pagar más
    * adelante. Vacío = arranca hoy, como siempre. */
   start_date?: string
-  /** Descuento opcional sobre el cobro inicial (precio del plan × meses). */
-  discount_type?: '' | 'percent' | 'fixed'
-  discount_value?: number
+  // Sin campo de descuento: el cobro inicial lo calcula el backend a partir del ciclo
+  // configurado en el plan para `subscription_months` (ver saas.PlanCycleDiscount) — ya no se
+  // recibe del formulario, para que el descuento de una empresa nueva nunca dependa de lo que
+  // el admin escriba a mano.
 }
 
 export interface UpdateTenantInput {

@@ -218,8 +218,8 @@ const createSchema = z.object({
       today.setHours(0, 0, 0, 0)
       return new Date(`${v}T00:00:00`) >= today
     }, 'No puede ser una fecha pasada'),
-  discount_type: z.enum(['', 'percent', 'fixed']).optional(),
-  discount_value: z.number().min(0).optional(),
+  // Sin campos de descuento: el backend lo calcula solo desde el ciclo configurado en el plan
+  // para `subscription_months` (ver createChargePreview, que muestra ese mismo cálculo).
 })
 
 const editSchema = z.object({
@@ -469,8 +469,6 @@ export default function TenantsPage() {
       subscription_months: 1,
       rubro: 'general',
       taxpayer_regime: 'general',
-      discount_type: '',
-      discount_value: 0,
     },
   })
 
@@ -490,8 +488,6 @@ export default function TenantsPage() {
   }
 
   const createPlanValue = createForm.watch('plan')
-  const createDiscountType = createForm.watch('discount_type')
-  const createDiscountValue = createForm.watch('discount_value')
   const createMonths = createForm.watch('subscription_months')
   const createStartDate = createForm.watch('start_date')
 
@@ -506,17 +502,30 @@ export default function TenantsPage() {
     return { startLabel: fmt(start), endLabel: fmt(end) }
   }, [createMonths, createStartDate])
 
-  /** Desglose del cobro inicial; replica ComputeCycleAmounts del backend. */
+  /**
+   * Desglose del cobro inicial. Ya no se calcula a mano: se lee directo del ciclo que el plan
+   * tiene configurado para `months` (saasPlans[].cycles, los mismos 4 fijos — 1/3/6/12 — que ya
+   * usa el autoservicio del tenant) — es EXACTAMENTE lo que el backend va a cobrar
+   * (PlanCycleDiscount), no una aproximación. Si el plan no tiene ese ciclo habilitado, se cobra
+   * el precio pleno sin descuento.
+   */
   const createChargePreview = useMemo(() => {
     const plan = saasPlans.find(p => p.name.toLowerCase() === (createPlanValue ?? '').toLowerCase())
     const months = Math.max(1, Number(createMonths) || 1)
+    const cycle = plan?.cycles.find(c => c.months === months && c.enabled)
+    if (plan && cycle) {
+      return {
+        gross: cycle.gross_amount,
+        discount: +(cycle.gross_amount - cycle.net_amount).toFixed(2),
+        net: cycle.net_amount,
+        discountType: cycle.discount_type,
+        discountValue: cycle.discount_value,
+        hasConfiguredCycle: true,
+      }
+    }
     const gross = plan ? +(plan.price * months).toFixed(2) : 0
-    const value = Number(createDiscountValue) || 0
-    let discount = 0
-    if (value > 0 && createDiscountType === 'percent') discount = Math.min(gross, (gross * value) / 100)
-    else if (value > 0 && createDiscountType === 'fixed') discount = Math.min(gross, value)
-    return { gross, discount: +discount.toFixed(2), net: +(gross - discount).toFixed(2) }
-  }, [saasPlans, createPlanValue, createMonths, createDiscountType, createDiscountValue])
+    return { gross, discount: 0, net: gross, discountType: '' as const, discountValue: 0, hasConfiguredCycle: false }
+  }, [saasPlans, createPlanValue, createMonths])
   const createRubroValue = createForm.watch('rubro')
 
   const createPlanPreview = useMemo(() => {
@@ -542,8 +551,6 @@ export default function TenantsPage() {
         address: data.address ?? '',
         ubigeo: createUbigeo.distritoId || undefined,
         subscription_months: months,
-        discount_type: data.discount_type || '',
-        discount_value: Number(data.discount_value) || 0,
       })
       toast.success('Empresa creada correctamente')
 
@@ -1341,39 +1348,41 @@ export default function TenantsPage() {
                 <strong>{createDatesPreview.endLabel}</strong>
               </p>
             </FormField>
-            <FormField label="Descuento" error={createForm.formState.errors.discount_type?.message}>
-              <select {...createForm.register('discount_type')} className={inputClass}>
-                <option value="">Sin descuento</option>
-                <option value="percent">Porcentaje (%)</option>
-                <option value="fixed">Monto fijo (S/)</option>
-              </select>
-              <p className="text-xs text-slate-500 mt-1">
-                Para contratos largos (6 meses o anual) con rebaja pactada.
-              </p>
-            </FormField>
-            <FormField
-              label={createDiscountType === 'percent' ? 'Porcentaje de descuento' : 'Monto de descuento (S/)'}
-              error={createForm.formState.errors.discount_value?.message}
-            >
-              <input
-                type="number"
-                min={0}
-                max={createDiscountType === 'percent' ? 100 : undefined}
-                step="0.01"
-                disabled={!createDiscountType}
-                {...createForm.register('discount_value', { valueAsNumber: true })}
-                className={`${inputClass} disabled:bg-slate-50 disabled:text-slate-400`}
-              />
-              {createChargePreview.gross > 0 && (
-                <p className="text-xs text-slate-600 mt-1">
-                  Cobro: S/ {createChargePreview.gross.toFixed(2)}
-                  {createChargePreview.discount > 0
-                    ? ` − S/ ${createChargePreview.discount.toFixed(2)} = `
-                    : ' = '}
-                  <strong>S/ {createChargePreview.net.toFixed(2)}</strong>
-                  {!payNow && <span className="text-slate-400"> · queda pendiente de pago</span>}
-                </p>
-              )}
+            {/* El descuento ya no se escribe a mano: sale del ciclo que el plan tiene
+                configurado para la duración elegida (mismos 4 ciclos fijos — 1/3/6/12 meses —
+                del autoservicio del tenant). Se edita desde Planes, no acá. */}
+            <FormField label="Descuento (según el plan)">
+              <div
+                className={`rounded-lg border px-3 py-2.5 text-sm ${
+                  createChargePreview.hasConfiguredCycle
+                    ? 'border-emerald-200 bg-emerald-50/60'
+                    : 'border-slate-200 bg-slate-50'
+                }`}
+              >
+                {createChargePreview.hasConfiguredCycle ? (
+                  <p className="text-emerald-800">
+                    {createChargePreview.discountType === 'percent'
+                      ? `${createChargePreview.discountValue}% de descuento`
+                      : `S/ ${createChargePreview.discountValue.toFixed(2)} de descuento`}{' '}
+                    configurado en el plan para {Number(createMonths) || 1} mes(es).
+                  </p>
+                ) : (
+                  <p className="text-slate-500">
+                    El plan no tiene un descuento configurado para {Number(createMonths) || 1} mes(es) — se
+                    cobra el precio pleno.
+                  </p>
+                )}
+                {createChargePreview.gross > 0 && (
+                  <p className="text-xs mt-1.5">
+                    Cobro: S/ {createChargePreview.gross.toFixed(2)}
+                    {createChargePreview.discount > 0
+                      ? ` − S/ ${createChargePreview.discount.toFixed(2)} = `
+                      : ' = '}
+                    <strong>S/ {createChargePreview.net.toFixed(2)}</strong>
+                    {!payNow && <span className="text-slate-400"> · queda pendiente de pago</span>}
+                  </p>
+                )}
+              </div>
             </FormField>
 
             {/* Cobro en el mismo paso. Opcional a propósito: el alta no depende de esto. */}
