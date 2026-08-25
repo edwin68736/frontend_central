@@ -204,7 +204,12 @@ const createSchema = z.object({
   taxpayer_regime: z.enum(['general', 'nrus']),
   admin_email: z.string().email('Email inválido'),
   admin_password: z.string().min(6, 'Mínimo 6 caracteres'),
-  address: z.string().optional(),
+  // Obligatorios: si quedan vacíos, el backend caía en un default "Arequipa" pensado solo para
+  // tenants de prueba — terminaba impreso como domicilio fiscal real en el comprobante de
+  // empresas de otras regiones. El departamento/provincia/distrito (createUbigeo, fuera de este
+  // schema porque UbigeoSelects no es un input de react-hook-form) se valida aparte en
+  // onCreateSubmit.
+  address: z.string().min(1, 'La dirección es obligatoria'),
   ubigeo: z.string().optional(),
   // Toda empresa nace con suscripción (las gratuitas, con el plan gratis). Restringido a los
   // mismos 4 ciclos fijos del plan (1/3/6/12 meses, ver saas.FixedPlanCycleMonths) — son los
@@ -570,6 +575,14 @@ export default function TenantsPage() {
   }, [saasPlans, moduleCatalog, createPlanValue, createRubroValue])
 
   const onCreateSubmit = async (data: CreateForm) => {
+    // createUbigeo vive fuera de react-hook-form (UbigeoSelects no es un input estándar), así
+    // que no lo valida el resolver de Zod — se valida acá antes de enviar. Sin esto, un tenant
+    // podía quedar con el default "Arequipa" del backend como domicilio fiscal aunque estuviera
+    // en otra región, porque nada obligaba a completar el departamento/provincia/distrito.
+    if (!createUbigeo.distritoId) {
+      toast.error('Seleccione departamento, provincia y distrito')
+      return
+    }
     try {
       const months = (() => {
         const m = Number((data as CreateForm & { subscription_months?: number }).subscription_months)
@@ -1579,7 +1592,7 @@ export default function TenantsPage() {
             )}
           </div>
 
-          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mt-2">Ubicación</p>
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mt-2">Ubicación *</p>
           <UbigeoSelects
             regionId={createUbigeo.regionId}
             provinciaId={createUbigeo.provinciaId}
@@ -1587,7 +1600,7 @@ export default function TenantsPage() {
             onChange={(regionId, provinciaId, distritoId) => setCreateUbigeo({ regionId, provinciaId, distritoId })}
             selectClassName={inputClass}
           />
-          <FormField label="Dirección" error={createForm.formState.errors.address?.message}>
+          <FormField label="Dirección *" error={createForm.formState.errors.address?.message}>
             <input {...createForm.register('address')} placeholder="Calle, nro, ref." className={inputClass} />
           </FormField>
           <hr className="border-slate-100" />
