@@ -20,30 +20,38 @@ import {
   GitBranch,
   FileStack,
   Activity,
+  ShieldCheck,
 } from 'lucide-react'
 
+// Cada item declara el permiso que lo habilita (Fase 9 §4) — el sidebar se filtra con
+// hasPermission() antes de renderizar, nunca con `role === 'admin'` hardcodeado. El único bypass
+// especial es el de superadmin real, ya resuelto dentro de hasPermission() (ver
+// src/lib/permissions.ts) — ningún item de este array necesita saberlo.
 const navItems = [
-  { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { to: '/tenants', label: 'Empresas', icon: Building2 },
-  { to: '/fleet-migrations', label: 'Migraciones', icon: GitBranch },
-  { to: '/fiscal', label: 'Documentos fiscales', icon: FileStack },
-  { to: '/fiscal-operations', label: 'Operaciones fiscales', icon: Activity },
-  { to: '/empresas-facturador', label: 'Facturador', icon: FileCheck },
-  { to: '/plans', label: 'Planes', icon: PackageOpen },
-  { to: '/subscriptions', label: 'Suscripciones', icon: CreditCard },
-  { to: '/payments', label: 'Pagos', icon: Receipt },
-  { to: '/saas-billing', label: 'Cobros SaaS', icon: CreditCard },
-  { to: '/document-packages', label: 'Paquetes docs', icon: FileCheck },
-  { to: '/users', label: 'Usuarios', icon: Users },
-  { to: '/settings', label: 'Configuración', icon: Settings },
+  { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, permission: 'dashboard.view' },
+  { to: '/tenants', label: 'Empresas', icon: Building2, permission: 'empresas.view' },
+  { to: '/fleet-migrations', label: 'Migraciones', icon: GitBranch, permission: 'migraciones.view' },
+  { to: '/fiscal', label: 'Documentos fiscales', icon: FileStack, permission: 'fiscal.view' },
+  { to: '/fiscal-operations', label: 'Operaciones fiscales', icon: Activity, permission: 'fiscal.view' },
+  { to: '/empresas-facturador', label: 'Facturador', icon: FileCheck, permission: 'facturador.view' },
+  { to: '/plans', label: 'Planes', icon: PackageOpen, permission: 'planes.view' },
+  { to: '/subscriptions', label: 'Suscripciones', icon: CreditCard, permission: 'suscripciones.view' },
+  { to: '/payments', label: 'Pagos', icon: Receipt, permission: 'pagos.view' },
+  { to: '/saas-billing', label: 'Cobros SaaS', icon: CreditCard, permission: 'ajustes.view' },
+  { to: '/document-packages', label: 'Paquetes docs', icon: FileCheck, permission: 'documentos.view' },
+  { to: '/users', label: 'Usuarios', icon: Users, permission: 'usuarios_central.view' },
+  { to: '/roles', label: 'Roles', icon: ShieldCheck, permission: 'roles.view' },
+  { to: '/settings', label: 'Configuración', icon: Settings, permission: 'ajustes.view' },
 ]
 
 export default function MainLayout() {
-  const { user, logout } = useAuth()
+  const { user, logout, hasPermission } = useAuth()
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
   const userMenuRef = useRef<HTMLDivElement | null>(null)
+
+  const visibleNavItems = navItems.filter((item) => hasPermission(item.permission))
 
   const handleLogout = () => {
     logout()
@@ -94,7 +102,7 @@ export default function MainLayout() {
 
         {/* Navigation */}
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-          {navItems.map(({ to, label, icon: Icon }) => (
+          {visibleNavItems.map(({ to, label, icon: Icon }) => (
             <NavLink
               key={to}
               to={to}

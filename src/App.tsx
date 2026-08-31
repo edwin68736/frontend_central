@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Toaster } from 'sonner'
 import { AuthProvider, useAuth } from '@/contexts/AuthContext'
+import RequirePermission from '@/components/auth/RequirePermission'
 import MainLayout from '@/layouts/MainLayout'
 import LoginPage from '@/pages/auth/LoginPage'
 import DashboardPage from '@/pages/dashboard/DashboardPage'
@@ -10,6 +11,7 @@ import PlansPage from '@/pages/plans/PlansPage'
 import SubscriptionsPage from '@/pages/subscriptions/SubscriptionsPage'
 import PaymentsPage from '@/pages/payments/PaymentsPage'
 import UsersPage from '@/pages/users/UsersPage'
+import RolesPage from '@/pages/roles/RolesPage'
 import ProfilePage from '@/pages/profile/ProfilePage'
 import SettingsPage from '@/pages/SettingsPage'
 import SaasBillingSettingsPage from '@/pages/saas/SaasBillingSettingsPage'
@@ -46,22 +48,28 @@ function AppRoutes() {
           </RequireAuth>
         }
       >
-        <Route path="/dashboard" element={<DashboardPage />} />
-        <Route path="/tenants" element={<TenantsPage />} />
-        <Route path="/empresas-facturador" element={<EmpresasFacturadorPage />} />
+        {/* Cada ruta declara su permiso — 401 (sesión inválida) ya se resolvió en RequireAuth
+            arriba; lo que RequirePermission cubre es 403 (sesión válida, sin el permiso), y
+            nunca redirige: muestra una pantalla de acceso denegado en el propio lugar (Fase 9 §3). */}
+        <Route path="/dashboard" element={<RequirePermission permission="dashboard.view"><DashboardPage /></RequirePermission>} />
+        <Route path="/tenants" element={<RequirePermission permission="empresas.view"><TenantsPage /></RequirePermission>} />
+        <Route path="/empresas-facturador" element={<RequirePermission permission="facturador.view"><EmpresasFacturadorPage /></RequirePermission>} />
         <Route path="/empresas-sunat" element={<Navigate to="/empresas-facturador" replace />} />
         <Route path="/empresas-pse" element={<Navigate to="/empresas-facturador" replace />} />
-        <Route path="/plans" element={<PlansPage />} />
-        <Route path="/subscriptions" element={<SubscriptionsPage />} />
-        <Route path="/payments" element={<PaymentsPage />} />
-        <Route path="/users" element={<UsersPage />} />
+        <Route path="/plans" element={<RequirePermission permission="planes.view"><PlansPage /></RequirePermission>} />
+        <Route path="/subscriptions" element={<RequirePermission permission="suscripciones.view"><SubscriptionsPage /></RequirePermission>} />
+        <Route path="/payments" element={<RequirePermission permission="pagos.view"><PaymentsPage /></RequirePermission>} />
+        <Route path="/users" element={<RequirePermission permission="usuarios_central.view"><UsersPage /></RequirePermission>} />
+        <Route path="/roles" element={<RequirePermission permission="roles.view"><RolesPage /></RequirePermission>} />
+        {/* /profile: autoservicio — cualquier usuario autenticado ve y edita su propio perfil, sin
+            ningún permiso granular de por medio (igual que el resto de "self-service" del backend). */}
         <Route path="/profile" element={<ProfilePage />} />
-        <Route path="/settings" element={<SettingsPage />} />
-        <Route path="/saas-billing" element={<SaasBillingSettingsPage />} />
-        <Route path="/document-packages" element={<DocumentPackagesPage />} />
-        <Route path="/fleet-migrations" element={<FleetMigrationsPage />} />
-        <Route path="/fiscal" element={<FiscalDocumentsPage />} />
-        <Route path="/fiscal-operations" element={<OperacionesFiscalesPage />} />
+        <Route path="/settings" element={<RequirePermission permission="ajustes.view"><SettingsPage /></RequirePermission>} />
+        <Route path="/saas-billing" element={<RequirePermission permission="ajustes.view"><SaasBillingSettingsPage /></RequirePermission>} />
+        <Route path="/document-packages" element={<RequirePermission permission="documentos.view"><DocumentPackagesPage /></RequirePermission>} />
+        <Route path="/fleet-migrations" element={<RequirePermission permission="migraciones.view"><FleetMigrationsPage /></RequirePermission>} />
+        <Route path="/fiscal" element={<RequirePermission permission="fiscal.view"><FiscalDocumentsPage /></RequirePermission>} />
+        <Route path="/fiscal-operations" element={<RequirePermission permission="fiscal.view"><OperacionesFiscalesPage /></RequirePermission>} />
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />

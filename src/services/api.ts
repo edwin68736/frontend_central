@@ -28,17 +28,34 @@ api.interceptors.request.use((config) => {
   return config
 })
 
+// 401 vs 403 (Fase 9 §13): son casos completamente distintos y NUNCA deben tratarse igual.
+//   401 = sesión inválida/expirada (JWT vencido, revocado, o el usuario fue desactivado/eliminado
+//         — ver middleware.verifySuperAdminSession en el backend) → no hay nada que mostrar salvo
+//         volver a iniciar sesión, así que este interceptor SÍ redirige.
+//   403 = sesión perfectamente válida, pero sin el permiso requerido (RequireSAPermission /
+//         CanDelegateAll / cuenta protegida en el backend) → NO es un problema de autenticación,
+//         así que este interceptor NUNCA redirige ni borra la sesión. El componente que hizo la
+//         llamada es quien debe mostrar el mensaje (ver apiErrorMessage en utils/apiError.ts, que
+//         ya da un fallback claro de "No tienes permiso..." para cualquier 403 sin mensaje propio
+//         del backend) — el interceptor solo deja pasar el rechazo tal cual.
+//
+// shouldRedirectToLogin está separada de la lógica de efecto (borrar storage, navegar) para poder
+// probar la DECISIÓN 401→sí / 403→no sin tener que simular una request axios completa.
+export function shouldRedirectToLogin(status: number | undefined, url: string | undefined): boolean {
+  const isLoginEndpoint = (url ?? '').includes('/superadmin/login')
+  return status === 401 && !isLoginEndpoint
+}
+
 api.interceptors.response.use(
   (res) => res,
   (err) => {
-    // Solo redirigir al login si el 401 viene de una ruta protegida (no del login mismo)
-    const url: string = err.config?.url ?? ''
-    const isLoginEndpoint = url.includes('/superadmin/login')
-    if (err.response?.status === 401 && !isLoginEndpoint) {
+    if (shouldRedirectToLogin(err.response?.status, err.config?.url)) {
       localStorage.removeItem('sa_token')
       localStorage.removeItem('sa_user')
       window.location.href = '/login'
     }
+    // 403: deliberadamente sin manejo especial aquí — nunca login, nunca se toca la sesión. El
+    // rechazo sigue su curso normal hacia el componente/servicio que hizo la llamada.
     return Promise.reject(err)
   }
 )

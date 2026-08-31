@@ -1,5 +1,6 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
-import { authService, SAUser } from '@/services/auth.service'
+import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react'
+import { authService, type SAUser } from '@/services/auth.service'
+import { hasPermission as checkPermission } from '@/lib/permissions'
 
 interface AuthState {
   user: SAUser | null
@@ -9,6 +10,9 @@ interface AuthState {
   login: (email: string, password: string) => Promise<void>
   logout: () => void
   updateUser: (partial: Partial<SAUser>) => void
+  /** Único punto de verdad de permisos en el frontend (ver src/lib/permissions.ts) — SOLO gating
+   *  de UX, nunca reemplaza la autorización real del backend (Fase 9 §15). */
+  hasPermission: (permission: string) => boolean
 }
 
 const AuthContext = createContext<AuthState | null>(null)
@@ -57,8 +61,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })
   }
 
+  const hasPermission = useCallback(
+    (permission: string) => checkPermission(user?.role, user?.permissions, permission),
+    [user?.role, user?.permissions]
+  )
+
   return (
-    <AuthContext.Provider value={{ user, token, isAuthenticated: !!token, isLoading, login, logout, updateUser }}>
+    <AuthContext.Provider
+      value={{ user, token, isAuthenticated: !!token, isLoading, login, logout, updateUser, hasPermission }}
+    >
       {children}
     </AuthContext.Provider>
   )
