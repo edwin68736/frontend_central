@@ -27,6 +27,7 @@ import { subscriptionsService, type SaasSubscription } from '@/services/subscrip
 import { getRootDomain, getTenantHost, resolveTenantUrl, buildMasterAccessUrl } from '@/utils/tenantUrl'
 import { fileToBase64Binary, fileToBase64Text } from '@/utils/fileBase64'
 import { exportTableToExcel, type ExportColumn } from '@/utils/exportExcel'
+import { cycleLabelFromMonths } from '@/utils/billingCycle'
 import { ubigeoService } from '@/services/ubigeo.service'
 import { UbigeoSelects, ubigeoToIds } from '@/components/UbigeoSelects'
 import { Card, CardHeader, CardBody } from '@/components/ui/Card'
@@ -50,18 +51,6 @@ const formatDateOnly = (iso?: string | null) => {
   if (Number.isNaN(d.getTime())) return '—'
   return d.toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' })
 }
-
-/** Ciclo de facturación de la suscripción (saas_subscriptions.billing_cycle). */
-const BILLING_CYCLE_LABELS: Record<string, string> = {
-  monthly: 'Mensual',
-  quarterly: 'Trimestral',
-  semiannual: 'Semestral',
-  annual: 'Anual',
-  yearly: 'Anual', // legacy: valor usado en saas_plans.billing_cycle (catálogo), no en la suscripción
-  lifetime: 'Vitalicio',
-}
-const billingCycleLabel = (cycle?: string | null) =>
-  cycle ? (BILLING_CYCLE_LABELS[cycle] ?? cycle) : '—'
 
 const subscriptionStatusVariant = (status?: string, daysOverdue?: number) => {
   if (daysOverdue && daysOverdue > 0) return 'red'
@@ -501,7 +490,7 @@ export default function TenantsPage() {
         { key: 'email', label: 'Email' },
         { key: 'ruc', label: 'RUC' },
         { key: 'plan_name', label: 'Plan', format: (v, row) => (v as string) || row.plan || '' },
-        { key: 'id', label: 'Ciclo', format: (_v, row) => billingCycleLabel(subsMap[row.id]?.billing_cycle) },
+        { key: 'id', label: 'Ciclo', format: (_v, row) => cycleLabelFromMonths(subsMap[row.id]?.billed_months) },
         { key: 'sunat_env_mode', label: 'Modo SUNAT', format: (v) => (isProduction(v as string) ? 'Producción' : 'Pruebas') },
         { key: 'status', label: 'Estado', format: (v) => statusLabel(v as string) },
         { key: 'created_at', label: 'Fecha de activación', format: (v) => formatDateOnly(v as string) },
@@ -1297,7 +1286,7 @@ export default function TenantsPage() {
                       <Badge variant="blue">{t.plan_name || t.plan}</Badge>
                     </td>
                     <td className="px-4 py-3 text-slate-600">
-                      {billingCycleLabel(subscriptionsByTenantId[t.id]?.billing_cycle)}
+                      {cycleLabelFromMonths(subscriptionsByTenantId[t.id]?.billed_months)}
                     </td>
                     <td className="px-4 py-3 text-slate-600 whitespace-nowrap">
                       {formatDateOnly(t.created_at)}

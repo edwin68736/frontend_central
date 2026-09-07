@@ -7,8 +7,15 @@ export interface SaasSubscription {
   tenant_name?: string
   plan_id: number
   plan_name: string
-  /** Ciclo contratado en esta suscripción: monthly | semiannual | annual. */
+  /**
+   * Billing_cycle ESTÁTICO del plan (monthly | yearly | lifetime, casi siempre "monthly" en el
+   * catálogo actual) — NO refleja cuántos meses se contrataron en esta suscripción puntual. Para
+   * eso ver `billed_months`.
+   */
   billing_cycle?: string
+  /** Meses VENDIDOS en esta suscripción/renovación (1 mensual, 3 trimestral, 6 semestral, 12
+   *  anual...) — es lo que realmente se cobró. Usar esto para mostrar/filtrar el "ciclo". */
+  billed_months?: number
   start_date: string
   end_date: string
   status: 'active' | 'expired' | 'suspended' | 'trial' | 'grace_period' | 'overdue' | 'provisional' | 'provisional_active' | 'cancelled'
@@ -38,7 +45,15 @@ export interface CreateSubscriptionInput {
 
 export interface SubscriptionListParams {
   status?: string
+  /** Filtro por ciclo: 1 mensual, 3 trimestral, 6 semestral, 12 anual (billed_months). */
+  billed_months?: number
   q?: string
+  /**
+   * Filtro por vencimiento (YYYY-MM-DD, inclusive): "por vencer" (end_date_to = hoy + N días),
+   * "vence en tal mes" (primer/último día del mes) o "ya vencieron" (end_date_to = ayer).
+   */
+  end_date_from?: string
+  end_date_to?: string
   page?: number
   per_page?: PerPageOption
 }
@@ -47,7 +62,10 @@ export const subscriptionsService = {
   async list(params: SubscriptionListParams = {}): Promise<PaginatedResponse<SaasSubscription>> {
     const searchParams = new URLSearchParams()
     if (params.status) searchParams.set('status', params.status)
+    if (params.billed_months) searchParams.set('billed_months', String(params.billed_months))
     if (params.q) searchParams.set('q', params.q)
+    if (params.end_date_from) searchParams.set('end_date_from', params.end_date_from)
+    if (params.end_date_to) searchParams.set('end_date_to', params.end_date_to)
     if (params.page) searchParams.set('page', String(params.page))
     if (params.per_page) searchParams.set('per_page', String(params.per_page))
     const r = await api.get<PaginatedResponse<SaasSubscription>>(`/superadmin/subscriptions?${searchParams}`)
