@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { Plus, Search, PauseCircle, PlayCircle, Clock, CalendarClock, AlertTriangle, Ban } from 'lucide-react'
+import {
+  Plus, Search, PauseCircle, PlayCircle, Clock, CalendarClock, AlertTriangle, Ban,
+  FileSpreadsheet, Loader2, ChevronDown,
+} from 'lucide-react'
 import { saasSettingsService } from '../../services/saasSettings.service'
 import {
   subscriptionsService,
@@ -15,6 +18,8 @@ import Badge from '../../components/ui/Badge'
 import PaginationBar from '../../components/ui/PaginationBar'
 import TenantSearchSelect from '../../components/TenantSearchSelect'
 import type { PerPageOption } from '../../services/pagination'
+import { exportTableToExcel, type ExportColumn } from '../../utils/exportExcel'
+import { cycleLabelFromMonths, CYCLE_MONTHS_OPTIONS } from '../../utils/billingCycle'
 
 const STATUS_CONFIG = {
   active: { label: 'Activa', variant: 'green' as const },
@@ -53,6 +58,16 @@ export default function SubscriptionsPage() {
   // un clic, pero dejaron de ser lo primero que se ve.
   const [filterStatus, setFilterStatus] = useState('active')
   const [search, setSearch] = useState('')
+  /** Ciclo (billed_months): 1 mensual, 3 trimestral, 6 semestral, 12 anual. '' = todos. */
+  const [billedMonthsFilter, setBilledMonthsFilter] = useState<number | ''>('')
+  /**
+   * Rango de vencimiento (end_date, YYYY-MM-DD). Cubre los 3 casos que pide el panel:
+   * "por vencer" (endDateTo = hoy + N días), "vence en tal mes" (primer/último día del mes,
+   * tecleado a mano) y "ya vencieron" (endDateTo = ayer, o combinado con filterStatus=expired).
+   */
+  const [endDateFromFilter, setEndDateFromFilter] = useState('')
+  const [endDateToFilter, setEndDateToFilter] = useState('')
+  const [exportingExcel, setExportingExcel] = useState(false)
   const [page, setPage] = useState(1)
   const [perPage, setPerPage] = useState<PerPageOption>(25)
   const [total, setTotal] = useState(0)
@@ -135,7 +150,10 @@ export default function SubscriptionsPage() {
       const [res, p] = await Promise.all([
         subscriptionsService.list({
           status: filterStatus,
+          billed_months: billedMonthsFilter || undefined,
           q: search,
+          end_date_from: endDateFromFilter,
+          end_date_to: endDateToFilter,
           page,
           per_page: perPage,
         }),
@@ -150,7 +168,7 @@ export default function SubscriptionsPage() {
     } finally {
       setLoading(false)
     }
-  }, [filterStatus, search, page, perPage])
+  }, [filterStatus, billedMonthsFilter, search, endDateFromFilter, endDateToFilter, page, perPage])
 
   // Plazo de pago configurado, para que el aviso del alta diga el número real.
   useEffect(() => {
@@ -168,7 +186,7 @@ export default function SubscriptionsPage() {
 
   useEffect(() => {
     setPage(1)
-  }, [filterStatus, search, perPage])
+  }, [filterStatus, billedMonthsFilter, search, endDateFromFilter, endDateToFilter, perPage])
 
   useEffect(() => {
     load()
@@ -348,6 +366,62 @@ export default function SubscriptionsPage() {
   const tenantLabel = (sub: SaasSubscription) =>
     sub.tenant_name || `Tenant #${sub.tenant_id}`
 
+  /**
+   * Exporta TODAS las suscripciones que matchean los filtros activos (no solo la página
+   * visible): pagina el mismo endpoint con per_page=100 hasta agotar total_pages.
+   */
+  const exportExcel = async () => {
+    setExportingExcel(true)
+    try {
+      const all: SaasSubscription[] = []
+      const perPageExport = 100
+      let p = 1
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const res = await subscriptionsService.list({
+          status: filterStatus,
+          billed_months: billedMonthsFilter || undefined,
+          q: search,
+          end_date_from: endDateFromFilter,
+          end_date_to: endDateToFilter,
+          page: p,
+          per_page: perPageExport,
+        })
+        all.push(...res.data)
+        if (res.data.length === 0 || p >= res.total_pages) break
+        p += 1
+      }
+      if (all.length === 0) {
+        toast.error('No hay suscripciones para exportar con estos filtros')
+        return
+      }
+      const columns: ExportColumn<SaasSubscription>[] = [
+        { key: 'id', label: 'Empresa', format: (_v, row) => tenantLabel(row) },
+        { key: 'plan_name', label: 'Plan' },
+        { key: 'billed_months', label: 'Ciclo', format: (v) => cycleLabelFromMonths(v as number) },
+        { key: 'start_date', label: 'Vigencia desde', format: (v) => fmtDate(v as string) },
+        { key: 'end_date', label: 'Vigencia hasta', format: (v) => fmtDate(v as string) },
+        {
+          key: 'status',
+          label: 'Estado',
+          format: (v) => STATUS_CONFIG[v as keyof typeof STATUS_CONFIG]?.label ?? (v as string),
+        },
+        { key: 'modules', label: 'Módulos', format: (v) => ((v as string[]) ?? []).join(', ') },
+      ]
+      await exportTableToExcel(
+        'Suscripciones',
+        columns,
+        all,
+        `suscripciones-tukifac-${new Date().toISOString().slice(0, 10)}.xlsx`,
+      )
+      toast.success(`${all.length} suscripción(es) exportadas`)
+    } catch {
+      toast.error('Error al exportar')
+    } finally {
+      setExportingExcel(false)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -362,6 +436,15 @@ export default function SubscriptionsPage() {
             className="flex items-center gap-2 px-3 py-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-sm transition-colors disabled:opacity-50"
           >
             <Clock size={14} /> {checkingExpired ? 'Verificando...' : 'Verificar vencidos'}
+          </button>
+          <button
+            onClick={() => void exportExcel()}
+            disabled={exportingExcel || loading}
+            className="flex items-center gap-2 px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+            title="Exportar a Excel las suscripciones que matchean los filtros actuales"
+          >
+            {exportingExcel ? <Loader2 size={14} className="animate-spin" /> : <FileSpreadsheet size={14} />}
+            Exportar Excel
           </button>
           <button
             onClick={() => {
@@ -403,6 +486,72 @@ export default function SubscriptionsPage() {
         </div>
       </div>
 
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+        <div className="relative">
+          <select
+            value={billedMonthsFilter}
+            onChange={e => setBilledMonthsFilter(e.target.value ? Number(e.target.value) : '')}
+            className="appearance-none pl-3 pr-8 py-2 border border-slate-300 rounded-lg text-sm bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+          >
+            <option value="">Todos los ciclos</option>
+            {CYCLE_MONTHS_OPTIONS.map(o => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+          <ChevronDown size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+        </div>
+        <div className="flex items-center gap-1.5">
+          <label className="text-xs text-slate-500 whitespace-nowrap" htmlFor="subs-end-date-from">
+            Vencimiento
+          </label>
+          <input
+            id="subs-end-date-from"
+            type="date"
+            value={endDateFromFilter}
+            onChange={e => setEndDateFromFilter(e.target.value)}
+            max={endDateToFilter || undefined}
+            className="px-2 py-2 border border-slate-300 rounded-lg text-sm bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+          />
+          <span className="text-xs text-slate-400">a</span>
+          <input
+            type="date"
+            value={endDateToFilter}
+            onChange={e => setEndDateToFilter(e.target.value)}
+            min={endDateFromFilter || undefined}
+            className="px-2 py-2 border border-slate-300 rounded-lg text-sm bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+          />
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            const today = new Date()
+            const in30 = new Date(today)
+            in30.setDate(in30.getDate() + 30)
+            const toISO = (d: Date) => d.toISOString().slice(0, 10)
+            setFilterStatus('active')
+            setEndDateFromFilter(toISO(today))
+            setEndDateToFilter(toISO(in30))
+          }}
+          className="px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 transition-colors whitespace-nowrap"
+          title="Activas que vencen en los próximos 30 días"
+        >
+          Por vencer (30 días)
+        </button>
+        {(billedMonthsFilter !== '' || endDateFromFilter || endDateToFilter) && (
+          <button
+            type="button"
+            onClick={() => {
+              setBilledMonthsFilter('')
+              setEndDateFromFilter('')
+              setEndDateToFilter('')
+            }}
+            className="text-xs text-slate-400 hover:text-slate-600 underline"
+          >
+            Limpiar ciclo/vencimiento
+          </button>
+        )}
+      </div>
+
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         {loading ? (
           <div className="flex justify-center py-16">
@@ -415,6 +564,7 @@ export default function SubscriptionsPage() {
                 <tr className="border-b border-slate-100 bg-slate-50">
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Empresa</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Plan</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Ciclo</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Vigencia</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Estado</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Módulos</th>
@@ -437,6 +587,7 @@ export default function SubscriptionsPage() {
                     >
                       <td className="px-4 py-3 font-medium text-slate-800">{tenantLabel(sub)}</td>
                       <td className="px-4 py-3 text-slate-600">{sub.plan_name}</td>
+                      <td className="px-4 py-3 text-slate-600">{cycleLabelFromMonths(sub.billed_months)}</td>
                       <td className="px-4 py-3">
                         <div className="text-slate-600">
                           {fmtDate(sub.start_date)} → {fmtDate(sub.end_date)}
