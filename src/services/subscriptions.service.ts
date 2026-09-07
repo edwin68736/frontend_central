@@ -7,6 +7,8 @@ export interface SaasSubscription {
   tenant_name?: string
   plan_id: number
   plan_name: string
+  /** Ciclo contratado en esta suscripción: monthly | semiannual | annual. */
+  billing_cycle?: string
   start_date: string
   end_date: string
   status: 'active' | 'expired' | 'suspended' | 'trial' | 'grace_period' | 'overdue' | 'provisional' | 'provisional_active' | 'cancelled'

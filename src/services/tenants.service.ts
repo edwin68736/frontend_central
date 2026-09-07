@@ -6,6 +6,13 @@ export interface TenantListParams {
   status?: string
   region_id?: string
   provincia_id?: string
+  /**
+   * Filtro por fecha de activación (YYYY-MM-DD, inclusive): es `created_at` del tenant — al
+   * registrarse, la empresa se suscribe a un plan obligatoriamente el mismo día, así que
+   * created_at hace de "fecha de activación" sin necesidad de mirar la suscripción.
+   */
+  created_from?: string
+  created_to?: string
   page?: number
   per_page?: number
 }
@@ -162,6 +169,8 @@ export const tenantsService = {
     if (params.status) searchParams.set('status', params.status)
     if (params.region_id) searchParams.set('region_id', params.region_id)
     if (params.provincia_id) searchParams.set('provincia_id', params.provincia_id)
+    if (params.created_from) searchParams.set('created_from', params.created_from)
+    if (params.created_to) searchParams.set('created_to', params.created_to)
     if (params.page) searchParams.set('page', String(params.page))
     if (params.per_page) searchParams.set('per_page', String(params.per_page))
     const { data } = await api.get<PaginatedResponse<Tenant>>(`/superadmin/tenants?${searchParams}`)

@@ -6,7 +6,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { toast } from 'sonner'
 import {
   Plus, Search, RefreshCw, Edit, Power, Layers, ChevronDown, Shield, SearchCheck, Trash2, AlertTriangle, LogIn, Loader2,
-  Upload,
+  Upload, FileSpreadsheet,
 } from 'lucide-react'
 import {
   tenantsService,
@@ -26,6 +26,7 @@ import { saasSettingsService, type PaymentMethodConfig } from '@/services/saasSe
 import { subscriptionsService, type SaasSubscription } from '@/services/subscriptions.service'
 import { getRootDomain, getTenantHost, resolveTenantUrl, buildMasterAccessUrl } from '@/utils/tenantUrl'
 import { fileToBase64Binary, fileToBase64Text } from '@/utils/fileBase64'
+import { exportTableToExcel, type ExportColumn } from '@/utils/exportExcel'
 import { ubigeoService } from '@/services/ubigeo.service'
 import { UbigeoSelects, ubigeoToIds } from '@/components/UbigeoSelects'
 import { Card, CardHeader, CardBody } from '@/components/ui/Card'
@@ -41,6 +42,26 @@ const statusVariant = (s: string) =>
   s === 'active' ? 'green' : s === 'inactive' ? 'red' : 'yellow'
 const statusLabel = (s: string) =>
   s === 'active' ? 'Activo' : s === 'inactive' ? 'Suspendido' : s
+
+/** "2026-09-02T..." → "02 sep 2026". Vacío/inválido → '—'. */
+const formatDateOnly = (iso?: string | null) => {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+  return d.toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' })
+}
+
+/** Ciclo de facturación de la suscripción (saas_subscriptions.billing_cycle). */
+const BILLING_CYCLE_LABELS: Record<string, string> = {
+  monthly: 'Mensual',
+  quarterly: 'Trimestral',
+  semiannual: 'Semestral',
+  annual: 'Anual',
+  yearly: 'Anual', // legacy: valor usado en saas_plans.billing_cycle (catálogo), no en la suscripción
+  lifetime: 'Vitalicio',
+}
+const billingCycleLabel = (cycle?: string | null) =>
+  cycle ? (BILLING_CYCLE_LABELS[cycle] ?? cycle) : '—'
 
 const subscriptionStatusVariant = (status?: string, daysOverdue?: number) => {
   if (daysOverdue && daysOverdue > 0) return 'red'
@@ -285,6 +306,14 @@ export default function TenantsPage() {
   const [statusFilter, setStatusFilter] = useState('')
   const [regionFilter, setRegionFilter] = useState('')
   const [provinciaFilter, setProvinciaFilter] = useState('')
+  /**
+   * Filtro por fecha de activación (YYYY-MM-DD): es created_at del tenant — al registrarse, la
+   * empresa se suscribe a un plan obligatoriamente el mismo día, así que created_at hace de
+   * "fecha de activación" sin necesidad de mirar la suscripción.
+   */
+  const [createdFromFilter, setCreatedFromFilter] = useState('')
+  const [createdToFilter, setCreatedToFilter] = useState('')
+  const [exportingExcel, setExportingExcel] = useState(false)
   const [regionesFilter, setRegionesFilter] = useState<{ id: string; nombre: string }[]>([])
   const [provinciasFilter, setProvinciasFilter] = useState<{ id: string; nombre: string }[]>([])
 
@@ -382,6 +411,8 @@ export default function TenantsPage() {
         status: statusFilter,
         region_id: regionFilter,
         provincia_id: provinciaFilter,
+        created_from: createdFromFilter,
+        created_to: createdToFilter,
         page,
         per_page: perPage,
       })
@@ -393,11 +424,11 @@ export default function TenantsPage() {
     } finally {
       setLoading(false)
     }
-  }, [search, statusFilter, regionFilter, provinciaFilter, page, perPage])
+  }, [search, statusFilter, regionFilter, provinciaFilter, createdFromFilter, createdToFilter, page, perPage])
 
   useEffect(() => {
     setPage(1)
-  }, [search, statusFilter, regionFilter, provinciaFilter, perPage])
+  }, [search, statusFilter, regionFilter, provinciaFilter, createdFromFilter, createdToFilter, perPage])
 
   useEffect(() => {
     fetchTenants()
@@ -422,6 +453,72 @@ export default function TenantsPage() {
       loadSubscriptions().catch(() => {})
     }
   }, [tenants])
+
+  /**
+   * Exporta TODAS las empresas que matchean los filtros activos (no solo la página visible):
+   * pagina el mismo endpoint con per_page=100 hasta agotar total_pages, y en paralelo resuelve
+   * la suscripción de cada una (para Ciclo y Fecha de activación) igual que hace la tabla.
+   */
+  const exportExcel = async () => {
+    setExportingExcel(true)
+    try {
+      const allTenants: Tenant[] = []
+      const perPageExport = 100
+      let p = 1
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const res = await tenantsService.list({
+          q: search,
+          status: statusFilter,
+          region_id: regionFilter,
+          provincia_id: provinciaFilter,
+          created_from: createdFromFilter,
+          created_to: createdToFilter,
+          page: p,
+          per_page: perPageExport,
+        })
+        allTenants.push(...res.data)
+        if (res.data.length === 0 || p >= res.total_pages) break
+        p += 1
+      }
+      if (allTenants.length === 0) {
+        toast.error('No hay empresas para exportar con estos filtros')
+        return
+      }
+      const subsMap: Record<number, SaasSubscription> = {}
+      await Promise.all(
+        allTenants
+          .filter(t => t.billing_enabled)
+          .map(async (t) => {
+            const sub = await subscriptionsService.getByTenant(t.id)
+            if (sub) subsMap[t.id] = sub
+          }),
+      )
+      const columns: ExportColumn<Tenant>[] = [
+        { key: 'name', label: 'Empresa' },
+        { key: 'slug', label: 'Slug' },
+        { key: 'rubro', label: 'Rubro', format: (v) => (v === 'gastronomico' ? 'Gastronómico' : 'General') },
+        { key: 'email', label: 'Email' },
+        { key: 'ruc', label: 'RUC' },
+        { key: 'plan_name', label: 'Plan', format: (v, row) => (v as string) || row.plan || '' },
+        { key: 'id', label: 'Ciclo', format: (_v, row) => billingCycleLabel(subsMap[row.id]?.billing_cycle) },
+        { key: 'sunat_env_mode', label: 'Modo SUNAT', format: (v) => (isProduction(v as string) ? 'Producción' : 'Pruebas') },
+        { key: 'status', label: 'Estado', format: (v) => statusLabel(v as string) },
+        { key: 'created_at', label: 'Fecha de activación', format: (v) => formatDateOnly(v as string) },
+      ]
+      await exportTableToExcel(
+        'Empresas',
+        columns,
+        allTenants,
+        `empresas-tukifac-${new Date().toISOString().slice(0, 10)}.xlsx`,
+      )
+      toast.success(`${allTenants.length} empresa(s) exportadas`)
+    } catch {
+      toast.error('Error al exportar')
+    } finally {
+      setExportingExcel(false)
+    }
+  }
 
   useEffect(() => {
     ubigeoService.getRegiones().then(setRegionesFilter)
@@ -1083,12 +1180,52 @@ export default function TenantsPage() {
             </select>
             <ChevronDown size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
           </div>
+          <div className="flex items-center gap-1.5">
+            <label className="text-xs text-slate-500 whitespace-nowrap" htmlFor="tenants-created-from">
+              Activación
+            </label>
+            <input
+              id="tenants-created-from"
+              type="date"
+              value={createdFromFilter}
+              onChange={(e) => setCreatedFromFilter(e.target.value)}
+              max={createdToFilter || undefined}
+              className="px-2 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+            />
+            <span className="text-xs text-slate-400">a</span>
+            <input
+              type="date"
+              value={createdToFilter}
+              onChange={(e) => setCreatedToFilter(e.target.value)}
+              min={createdFromFilter || undefined}
+              className="px-2 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+            />
+            {(createdFromFilter || createdToFilter) && (
+              <button
+                type="button"
+                onClick={() => { setCreatedFromFilter(''); setCreatedToFilter('') }}
+                className="text-xs text-slate-400 hover:text-slate-600 underline"
+                title="Quitar filtro de fecha"
+              >
+                Limpiar
+              </button>
+            )}
+          </div>
           <button
             onClick={fetchTenants}
             className="flex items-center gap-2 px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-600 hover:bg-slate-50 transition-colors"
           >
             <RefreshCw size={14} />
             Actualizar
+          </button>
+          <button
+            onClick={() => void exportExcel()}
+            disabled={exportingExcel || loading}
+            className="flex items-center gap-2 px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+            title="Exportar a Excel las empresas que matchean los filtros actuales"
+          >
+            {exportingExcel ? <Loader2 size={14} className="animate-spin" /> : <FileSpreadsheet size={14} />}
+            Exportar Excel
           </button>
         </CardBody>
       </Card>
@@ -1115,7 +1252,7 @@ export default function TenantsPage() {
                 <table className="w-full text-sm">
               <thead className="bg-slate-50 border-y border-slate-100">
                 <tr>
-                  {['Empresa', 'Slug', 'Rubro', 'Email', 'RUC', 'Plan', 'Suscripción', 'Modo SUNAT', 'Facturador', 'Estado', 'Acciones'].map((h) => (
+                  {['Empresa', 'Slug', 'Rubro', 'Email', 'RUC', 'Plan', 'Ciclo', 'Activación', 'Suscripción', 'Modo SUNAT', 'Facturador', 'Estado', 'Acciones'].map((h) => (
                     <th
                       key={h}
                       className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide"
@@ -1158,6 +1295,12 @@ export default function TenantsPage() {
                       {/* plan_name viene resuelto de la suscripción vigente; t.plan es el
                           texto suelto y solo sirve de respaldo. */}
                       <Badge variant="blue">{t.plan_name || t.plan}</Badge>
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {billingCycleLabel(subscriptionsByTenantId[t.id]?.billing_cycle)}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600 whitespace-nowrap">
+                      {formatDateOnly(t.created_at)}
                     </td>
                     <td className="px-4 py-3">
                       <SubscriptionStatusCell sub={subscriptionsByTenantId[t.id]} />
