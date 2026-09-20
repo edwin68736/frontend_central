@@ -63,6 +63,9 @@ export interface FiscalQueueItem {
   provider: string | null
   send_mode: string | null
   retry_count: number
+  /** transient | permanent | business | manual_only | null — ya lo manda el backend (FiscalOperationsService::serializeQueueItem), antes no estaba tipado. */
+  error_type?: string | null
+  retryable?: boolean
   sunat_message: string | null
   pse_message?: string | null
   pse_response?: {

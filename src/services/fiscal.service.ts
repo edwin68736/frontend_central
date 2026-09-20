@@ -36,9 +36,10 @@ export interface FiscalDocumentSummary {
   customer_email: string | null
   email_status: string | null
   retry_count: number
-  /** transient | permanent | business | null — desambigua el estado "error". */
+  /** transient | permanent | business | manual_only | null — desambigua el estado "error". */
   error_type?: string | null
   retryable?: boolean
+  next_retry_at?: string | null
   created_at: string
   accepted_at: string | null
 }
@@ -98,6 +99,14 @@ const qs = (filters: FiscalFilters) => {
   return p.toString()
 }
 
+export interface FiscalBulkActionResult {
+  action: string
+  queued: number
+  /** Documentos omitidos por el guard fiscal (business/permanent/manual_only/accepted) — ver FiscalBulkActionService::shouldSkip(). */
+  skipped: number
+  errors: string[]
+}
+
 export const fiscalService = {
   getStats: (filters: Pick<FiscalFilters, 'tenant_slug' | 'from' | 'to'> = {}) =>
     api.get<FiscalStats>(`/superadmin/fiscal/stats?${qs(filters)}`).then((r) => r.data),
@@ -116,7 +125,10 @@ export const fiscalService = {
   bulkAction: (
     action: 'send' | 'retry' | 'force' | 'email' | 'poll',
     payload: { document_uuids?: string[]; filters?: Record<string, unknown>; max?: number }
-  ) => api.post(`/superadmin/fiscal/documents/bulk/${action}`, payload).then((r) => r.data),
+  ) =>
+    api
+      .post<FiscalBulkActionResult>(`/superadmin/fiscal/documents/bulk/${action}`, payload)
+      .then((r) => r.data),
 
   downloadUrl: (uuid: string, type: 'xml' | 'signed_xml' | 'cdr' | 'pdf' | 'unsigned_xml') => {
     const base = api.defaults.baseURL || '/api'

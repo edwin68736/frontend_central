@@ -27,6 +27,14 @@ import { Card, CardBody, CardHeader } from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
 import Spinner from '@/components/ui/Spinner'
 import Modal from '@/components/ui/Modal'
+import {
+  fiscalGroup,
+  isNormalActionBlocked,
+  needsForceConfirmation,
+  fiscalExplanation,
+  retryProgressLabel,
+  fiscalActionErrorMessage,
+} from '@/lib/fiscalStatus'
 
 const STORAGE_KEY = 'sa_fiscal_filters_v1'
 const PAGE_SIZE = 50
@@ -53,32 +61,6 @@ const STATUS_OPTS = [
   { v: 'action', l: 'Requiere acción' },
   { v: 'cancelled', l: 'Anulado' },
 ]
-
-type FiscalGroup = { label: string; variant: 'green' | 'red' | 'yellow' | 'blue' | 'gray' }
-
-/**
- * Colapsa los ~10 estados internos a 6 estados claros para el usuario:
- * En proceso · Aceptado · Con observaciones · Rechazado · Requiere acción · Anulado.
- */
-function fiscalGroup(status: string, errorType?: string | null): FiscalGroup {
-  switch (status) {
-    case 'accepted':
-      return { label: 'Aceptado', variant: 'green' }
-    case 'observed':
-      return { label: 'Con observaciones', variant: 'yellow' }
-    case 'rejected':
-      return { label: 'Rechazado', variant: 'red' }
-    case 'cancelled':
-      return { label: 'Anulado', variant: 'gray' }
-    case 'error':
-      // Transitorio se sigue reintentando → "En proceso". Permanente/legado → "Requiere acción".
-      return errorType === 'transient'
-        ? { label: 'En proceso', variant: 'blue' }
-        : { label: 'Requiere acción', variant: 'red' }
-    default: // pending, queued, sending, sent, retrying
-      return { label: 'En proceso', variant: 'blue' }
-  }
-}
 
 function KpiCard({
   label,
@@ -250,6 +232,11 @@ export default function FiscalDocumentsPage() {
   }
 
   const runBulk = async (action: 'send' | 'retry' | 'force' | 'email' | 'poll') => {
+    if (action === 'force' && !window.confirm(
+      'Forzar reenvía documentos sin respetar las reglas normales de send/retry (incluye aceptados, rechazos de negocio y los que requieren acción manual). ¿Continuar?'
+    )) {
+      return
+    }
     setBulkLoading(true)
     try {
       const payload =
@@ -257,24 +244,33 @@ export default function FiscalDocumentsPage() {
           ? { document_uuids: Array.from(selected), max: 200 }
           : { filters: { ...filterQuery }, max: 200 }
       const res = await fiscalService.bulkAction(action, payload)
-      toast.success(`Bulk ${action}: ${res.queued ?? 0} encolados`)
+      const skipped = res.skipped ?? 0
+      toast.success(
+        `Bulk ${action}: ${res.queued ?? 0} encolados` +
+          (skipped > 0 ? ` · ${skipped} omitidos por regla fiscal (accepted/business/permanent/manual_only)` : '')
+      )
       setSelected(new Set())
       reload()
-    } catch {
-      toast.error('Error en acción masiva')
+    } catch (err) {
+      toast.error(fiscalActionErrorMessage(err, 'Error en acción masiva'))
     } finally {
       setBulkLoading(false)
     }
   }
 
-  const runAction = async (uuid: string, action: 'send' | 'retry' | 'force' | 'email' | 'poll') => {
+  const runAction = async (uuid: string, action: 'send' | 'retry' | 'force' | 'email' | 'poll', doc?: { status: string; error_type?: string | null }) => {
+    if (action === 'force' && doc && needsForceConfirmation(doc.status, doc.error_type) && !window.confirm(
+      'Este documento está aceptado, es un rechazo de negocio, o requiere acción manual. Forzar el reenvío es una acción administrativa explícita. ¿Continuar?'
+    )) {
+      return
+    }
     try {
       await fiscalService.documentAction(uuid, action)
       toast.success(`Acción ${action} encolada`)
       if (detail?.document.document_uuid === uuid) openDetail(uuid)
       reload()
-    } catch {
-      toast.error('Error en acción')
+    } catch (err) {
+      toast.error(fiscalActionErrorMessage(err, 'Error en acción'))
     }
   }
 
@@ -517,7 +513,7 @@ export default function FiscalDocumentsPage() {
                   </td>
                   <td className="p-3">
                     {(() => {
-                      const g = fiscalGroup(doc.status, doc.error_type)
+                      const g = fiscalGroup(doc.status, doc.error_type, doc.retryable)
                       return <Badge variant={g.variant}>{g.label}</Badge>
                     })()}
                   </td>
@@ -567,16 +563,34 @@ export default function FiscalDocumentsPage() {
         {detail && !detailLoading && (
           <div className="space-y-4">
             <div className="flex flex-wrap gap-2">
-              {(['retry', 'send', 'force', 'poll', 'email'] as const).map((a) => (
-                <button
-                  key={a}
-                  type="button"
-                  onClick={() => runAction(detail.document.document_uuid, a)}
-                  className="px-3 py-1.5 text-xs bg-indigo-50 text-indigo-700 rounded-lg hover:bg-indigo-100"
-                >
-                  {a}
-                </button>
-              ))}
+              {(['retry', 'send', 'force', 'poll', 'email'] as const)
+                .filter(
+                  (a) =>
+                    a === 'force' ||
+                    a === 'poll' ||
+                    a === 'email' ||
+                    !isNormalActionBlocked(detail.document.status, detail.document.error_type)
+                )
+                .map((a) => (
+                  <button
+                    key={a}
+                    type="button"
+                    onClick={() => runAction(detail.document.document_uuid, a, detail.document)}
+                    className={
+                      a === 'force'
+                        ? 'px-3 py-1.5 text-xs bg-amber-50 text-amber-800 rounded-lg hover:bg-amber-100 border border-amber-200'
+                        : 'px-3 py-1.5 text-xs bg-indigo-50 text-indigo-700 rounded-lg hover:bg-indigo-100'
+                    }
+                    title={a === 'force' ? 'Override administrativo: ignora las reglas normales de reenvío' : undefined}
+                  >
+                    {a}
+                  </button>
+                ))}
+              {isNormalActionBlocked(detail.document.status, detail.document.error_type) && (
+                <span className="text-xs text-slate-500 self-center">
+                  send/retry normal no disponible en este estado — usar "force" para forzar de todas formas.
+                </span>
+              )}
               {(['xml', 'signed_xml', 'cdr', 'pdf'] as const).map((t) => (
                 <button
                   key={t}
@@ -605,21 +619,34 @@ export default function FiscalDocumentsPage() {
               <div className="col-span-2 flex flex-wrap items-center gap-2">
                 <span className="text-slate-500">Estado:</span>
                 {(() => {
-                  const g = fiscalGroup(detail.document.status, detail.document.error_type)
+                  const g = fiscalGroup(detail.document.status, detail.document.error_type, detail.document.retryable)
                   return <Badge variant={g.variant}>{g.label}</Badge>
                 })()}
-                {detail.document.error_type ? (
-                  <span className="text-xs text-slate-500">
-                    (
-                    {detail.document.error_type === 'transient'
-                      ? 'se reintenta automáticamente'
-                      : detail.document.error_type === 'permanent'
-                        ? 'requiere acción manual'
-                        : 'rechazo de negocio SUNAT/PSE'}
-                    {typeof detail.document.retry_count === 'number' ? ` · intentos: ${detail.document.retry_count}` : ''})
-                  </span>
-                ) : null}
+                {(() => {
+                  const explanation = fiscalExplanation(
+                    detail.document.status,
+                    detail.document.error_type,
+                    detail.document.retryable
+                  )
+                  const progress = retryProgressLabel(
+                    detail.document.retry_count,
+                    detail.document.error_type,
+                    detail.document.retryable
+                  )
+                  if (!explanation && !progress) return null
+                  return (
+                    <span className="text-xs text-slate-500">
+                      {[explanation, progress].filter(Boolean).join(' · ')}
+                    </span>
+                  )
+                })()}
               </div>
+              {detail.document.next_retry_at ? (
+                <div className="col-span-2 text-xs text-slate-500">
+                  <span className="text-slate-500">Próximo reintento automático:</span>{' '}
+                  {new Date(detail.document.next_retry_at).toLocaleString()}
+                </div>
+              ) : null}
               <div className="col-span-2">
                 <span className="text-slate-500">SUNAT / PSE:</span> {detail.document.sunat_code} —{' '}
                 {detail.document.sunat_message}

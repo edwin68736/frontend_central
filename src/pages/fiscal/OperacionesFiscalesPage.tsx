@@ -25,6 +25,13 @@ import { Card, CardBody, CardHeader } from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
 import Spinner from '@/components/ui/Spinner'
 import Modal from '@/components/ui/Modal'
+import {
+  fiscalGroup,
+  isNormalActionBlocked,
+  fiscalExplanation,
+  retryProgressLabel,
+  fiscalActionErrorMessage,
+} from '@/lib/fiscalStatus'
 
 function healthVariant(s: string): 'green' | 'yellow' | 'red' | 'gray' {
   if (s === 'healthy') return 'green'
@@ -162,8 +169,8 @@ export default function OperacionesFiscalesPage() {
       await fiscalOperationsService.retryDocument(uuid)
       toast.success('Reprocesamiento encolado')
       load()
-    } catch {
-      toast.error('Error al reprocesar')
+    } catch (err) {
+      toast.error(fiscalActionErrorMessage(err, 'Error al reprocesar'))
     } finally {
       setActionLoading(null)
     }
@@ -394,7 +401,18 @@ export default function OperacionesFiscalesPage() {
                     <td className="py-2 px-2">
                       {item.document_type}-{item.series}-{item.number}
                     </td>
-                    <td className="py-2 px-2">{item.status}</td>
+                    <td className="py-2 px-2">
+                      {(() => {
+                        const g = fiscalGroup(item.status, item.error_type, item.retryable)
+                        const progress = retryProgressLabel(item.retry_count, item.error_type, item.retryable)
+                        return (
+                          <div className="flex flex-col gap-0.5">
+                            <Badge variant={g.variant}>{g.label}</Badge>
+                            {progress && <span className="text-[11px] text-slate-500">{progress}</span>}
+                          </div>
+                        )
+                      })()}
+                    </td>
                     <td className="py-2 px-2 text-xs text-red-600 max-w-md">
                       <div className="truncate" title={item.display_message || item.pse_message || item.sunat_message || ''}>
                         {item.display_message || item.pse_message || item.sunat_message || '—'}
@@ -405,6 +423,12 @@ export default function OperacionesFiscalesPage() {
                           {String(item.pse_response.estado ?? '—')}
                         </div>
                       ) : null}
+                      {(() => {
+                        const explanation = fiscalExplanation(item.status, item.error_type, item.retryable)
+                        return explanation ? (
+                          <div className="text-slate-500 mt-0.5 truncate">{explanation}</div>
+                        ) : null
+                      })()}
                     </td>
                     <td className="py-2 px-2 flex gap-1 flex-wrap">
                       <button
@@ -415,7 +439,8 @@ export default function OperacionesFiscalesPage() {
                       >
                         Timeline
                       </button>
-                      {(item.status === 'error' || item.status === 'retrying' || item.status === 'queued') && (
+                      {(item.status === 'error' || item.status === 'retrying' || item.status === 'queued') &&
+                        !isNormalActionBlocked(item.status, item.error_type) && (
                         <button
                           type="button"
                           disabled={actionLoading === item.document_uuid}
@@ -424,6 +449,11 @@ export default function OperacionesFiscalesPage() {
                         >
                           <RotateCcw size={12} /> Reprocesar
                         </button>
+                      )}
+                      {item.status === 'error' && isNormalActionBlocked(item.status, item.error_type) && (
+                        <span className="text-xs text-slate-500 self-center">
+                          Requiere acción administrativa (forzar desde Documentos Fiscales)
+                        </span>
                       )}
                       {(item.status === 'queued' || item.status === 'pending' || item.status === 'retrying') && (
                         <button
