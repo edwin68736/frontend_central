@@ -127,8 +127,8 @@ describe('FiscalDocumentsPage — Fase 3', () => {
     render(<FiscalDocumentsPage />)
     await openDetailFor('tenant-accepted')
 
-    expect(screen.queryByRole('button', { name: 'retry' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'send' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Reintentar' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Enviar' })).not.toBeInTheDocument()
     expect(screen.getByText(/send\/retry normal no disponible/i)).toBeInTheDocument()
   })
 
@@ -140,7 +140,7 @@ describe('FiscalDocumentsPage — Fase 3', () => {
     render(<FiscalDocumentsPage />)
     const user = await openDetailFor('tenant-accepted')
 
-    const forceBtn = screen.getByRole('button', { name: 'force' })
+    const forceBtn = screen.getByRole('button', { name: 'Forzar' })
     expect(forceBtn).toBeInTheDocument()
     await user.click(forceBtn)
 
@@ -155,7 +155,7 @@ describe('FiscalDocumentsPage — Fase 3', () => {
     render(<FiscalDocumentsPage />)
     await openDetailFor('tenant-transient')
 
-    expect(screen.getByRole('button', { name: 'retry' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Reintentar' })).toBeInTheDocument()
     // Aparece tanto en la fila de la tabla como en el badge del modal de detalle.
     expect(screen.getAllByText('En proceso').length).toBeGreaterThan(0)
   })
@@ -182,7 +182,7 @@ describe('FiscalDocumentsPage — Fase 3', () => {
     render(<FiscalDocumentsPage />)
     const user = await openDetailFor('tenant-transient')
 
-    await user.click(screen.getByRole('button', { name: 'retry' }))
+    await user.click(screen.getByRole('button', { name: 'Reintentar' }))
 
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith(

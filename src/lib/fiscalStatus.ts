@@ -211,3 +211,15 @@ const QUEUE_TAB_LABELS: Record<string, string> = {
 export function queueTabLabel(tab: string): string {
   return QUEUE_TAB_LABELS[tab] ?? tab
 }
+
+const ACTION_LABELS: Record<string, string> = {
+  retry: 'Reintentar',
+  send: 'Enviar',
+  force: 'Forzar',
+  poll: 'Consultar',
+  email: 'Correo',
+}
+
+export function actionLabel(action: string): string {
+  return ACTION_LABELS[action] ?? action
+}

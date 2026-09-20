@@ -318,7 +318,7 @@ export default function OperacionesFiscalesPage() {
         <KpiCard label="Documentos hoy" value={cards?.documents_today ?? 0} />
         <KpiCard label="Pendientes" value={cards?.pending ?? 0} />
         <KpiCard label="Errores hoy" value={cards?.errors_today ?? 0} />
-        <KpiCard label="Retries hoy" value={cards?.retries_today ?? 0} />
+        <KpiCard label="Reintentos hoy" value={cards?.retries_today ?? 0} />
         <KpiCard label="Tiempo prom. ms" value={cards?.avg_duration_ms ?? '—'} />
         <KpiCard label="Tenants conectados" value={cards?.tenants_connected ?? 0} />
         <KpiCard label="Tenants con error" value={cards?.tenants_with_error ?? 0} />
@@ -535,7 +535,7 @@ export default function OperacionesFiscalesPage() {
                         onClick={() => openTimeline(item.document_uuid)}
                         className="text-xs px-2 py-1 border rounded hover:bg-slate-50"
                       >
-                        Timeline
+                        Línea de tiempo
                       </button>
                       {(item.status === 'error' || item.status === 'retrying' || item.status === 'queued') &&
                         !isNormalActionBlocked(item.status, item.error_type) && (
@@ -604,7 +604,7 @@ export default function OperacionesFiscalesPage() {
         </div>
       </Card>
 
-      <Modal open={timelineOpen} onClose={() => setTimelineOpen(false)} title="Timeline fiscal">
+      <Modal open={timelineOpen} onClose={() => setTimelineOpen(false)} title="Línea de tiempo fiscal">
         {!timeline ? (
           <Spinner size={28} />
         ) : (

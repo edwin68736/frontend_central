@@ -36,6 +36,7 @@ import {
   fiscalActionErrorMessage,
   sendModeLabel,
   emailStatusLabel,
+  actionLabel,
 } from '@/lib/fiscalStatus'
 
 const STORAGE_KEY = 'sa_fiscal_filters_v1'
@@ -434,7 +435,7 @@ export default function FiscalDocumentsPage() {
               checked={!!filters.retry_only}
               onChange={(e) => setFilters((f) => ({ ...f, retry_only: e.target.checked || undefined }))}
             />
-            Solo retry
+            Solo reintentos
           </label>
           <button
             type="button"
@@ -460,7 +461,7 @@ export default function FiscalDocumentsPage() {
                 onClick={() => runBulk(a)}
                 className="px-3 py-1.5 text-xs bg-slate-100 hover:bg-slate-200 rounded-lg disabled:opacity-50"
               >
-                Bulk {a}
+                {actionLabel(a)} (lote)
               </button>
             ))}
           </p>
@@ -486,7 +487,7 @@ export default function FiscalDocumentsPage() {
                 <th className="p-3 text-left">Proveedor</th>
                 <th className="p-3 text-right">Monto</th>
                 <th className="p-3 text-left">Email</th>
-                <th className="p-3 text-center">Retry</th>
+                <th className="p-3 text-center">Reintentos</th>
               </tr>
             </thead>
             <tbody>
@@ -585,7 +586,7 @@ export default function FiscalDocumentsPage() {
                     }
                     title={a === 'force' ? 'Override administrativo: ignora las reglas normales de reenvío' : undefined}
                   >
-                    {a}
+                    {actionLabel(a)}
                   </button>
                 ))}
               {isNormalActionBlocked(detail.document.status, detail.document.error_type) && (
@@ -667,7 +668,7 @@ export default function FiscalDocumentsPage() {
             ) : null}
 
             <div>
-              <h3 className="font-semibold text-slate-700 mb-2">Timeline</h3>
+              <h3 className="font-semibold text-slate-700 mb-2">Línea de tiempo</h3>
               <div className="max-h-48 overflow-y-auto space-y-1 text-xs">
                 {detail.timeline.map((ev, i) => (
                   <div key={i} className="flex gap-2 py-1 border-b border-slate-50">
