@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   Activity,
   AlertTriangle,
   BarChart3,
+  ChevronLeft,
+  ChevronRight,
   Clock,
   RefreshCw,
   Search,
@@ -17,7 +19,7 @@ import {
   FiscalAuditTimeline,
   FiscalHealth,
   FiscalOperationsSummary,
-  FiscalQueueItem,
+  FiscalQueueGroup,
   FiscalQueueMonitor,
   FiscalTenantOperation,
 } from '@/services/fiscal-operations.service'
@@ -31,6 +33,10 @@ import {
   fiscalExplanation,
   retryProgressLabel,
   fiscalActionErrorMessage,
+  connectionStatusLabel,
+  healthStatusLabel,
+  sendModeLabel,
+  queueTabLabel,
 } from '@/lib/fiscalStatus'
 
 function healthVariant(s: string): 'green' | 'yellow' | 'red' | 'gray' {
@@ -96,14 +102,20 @@ function MiniBarChart({
   )
 }
 
+const TENANTS_PAGE_SIZE = 25
+const QUEUE_PAGE_SIZE = 25
+
 export default function OperacionesFiscalesPage() {
   const [loading, setLoading] = useState(true)
   const [health, setHealth] = useState<FiscalHealth | null>(null)
   const [summary, setSummary] = useState<FiscalOperationsSummary | null>(null)
   const [tenants, setTenants] = useState<FiscalTenantOperation[]>([])
+  const [tenantsTotal, setTenantsTotal] = useState(0)
+  const [tenantsOffset, setTenantsOffset] = useState(0)
   const [queue, setQueue] = useState<FiscalQueueMonitor | null>(null)
+  const [queueOffset, setQueueOffset] = useState(0)
   const [alerts, setAlerts] = useState<FiscalAlertItem[]>([])
-  const [queueTab, setQueueTab] = useState<'queued' | 'processing' | 'failed' | 'retrying'>('queued')
+  const [queueTab, setQueueTab] = useState<FiscalQueueGroup>('queued')
   const [search, setSearch] = useState('')
   const [errorsOnly, setErrorsOnly] = useState(false)
   const [pendingOnly, setPendingOnly] = useState(false)
@@ -111,25 +123,18 @@ export default function OperacionesFiscalesPage() {
   const [timelineOpen, setTimelineOpen] = useState(false)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
 
-  const load = useCallback(async () => {
+  // Salud/KPIs/alertas — no dependen de ninguna paginación, se refrescan cada 30s.
+  const loadCore = useCallback(async () => {
     setLoading(true)
     try {
       const results = await Promise.allSettled([
         fiscalOperationsService.getHealth(),
         fiscalOperationsService.getSummary(),
-        fiscalOperationsService.getTenants({
-          q: search || undefined,
-          errors_only: errorsOnly,
-          pending_only: pendingOnly,
-        }),
-        fiscalOperationsService.getQueue(),
         fiscalOperationsService.getAlerts(),
       ])
-      const [h, s, t, q, a] = results
+      const [h, s, a] = results
       if (h.status === 'fulfilled') setHealth(h.value)
       if (s.status === 'fulfilled') setSummary(s.value)
-      if (t.status === 'fulfilled') setTenants(t.value.items || [])
-      if (q.status === 'fulfilled') setQueue(q.value)
       if (a.status === 'fulfilled') setAlerts(a.value.items || [])
       if (results.every((r) => r.status === 'rejected')) {
         toast.error('Error cargando operaciones fiscales')
@@ -140,18 +145,86 @@ export default function OperacionesFiscalesPage() {
     } finally {
       setLoading(false)
     }
-  }, [search, errorsOnly, pendingOnly])
+  }, [])
+
+  // Fase 8: tabla de tenants paginada de verdad (antes traía los ~384 tenants habilitados de
+  // una sola vez, sin límite, y el frontend los pintaba todos como filas).
+  const loadTenants = useCallback(async () => {
+    try {
+      const data = await fiscalOperationsService.getTenants({
+        q: search || undefined,
+        errors_only: errorsOnly,
+        pending_only: pendingOnly,
+        limit: TENANTS_PAGE_SIZE,
+        offset: tenantsOffset,
+      })
+      setTenants(data.items || [])
+      setTenantsTotal(data.total ?? 0)
+    } catch {
+      toast.error('Error cargando tenants')
+    }
+  }, [search, errorsOnly, pendingOnly, tenantsOffset])
+
+  // Fase 8: la cola ahora se pide UN bucket a la vez, paginado, en vez de los 4 buckets con
+  // tope fijo de 50 sin forma de ver más.
+  const loadQueue = useCallback(async () => {
+    try {
+      const data = await fiscalOperationsService.getQueue({
+        group: queueTab,
+        limit: QUEUE_PAGE_SIZE,
+        offset: queueOffset,
+      })
+      setQueue(data)
+    } catch {
+      toast.error('Error cargando la cola')
+    }
+  }, [queueTab, queueOffset])
 
   useEffect(() => {
-    load()
-    const id = setInterval(load, 30000)
+    loadCore()
+    const id = setInterval(loadCore, 30000)
     return () => clearInterval(id)
-  }, [load])
+  }, [loadCore])
 
-  const queueItems = useMemo((): FiscalQueueItem[] => {
-    if (!queue) return []
-    return queue[queueTab] || []
-  }, [queue, queueTab])
+  useEffect(() => {
+    loadTenants()
+    const id = setInterval(loadTenants, 30000)
+    return () => clearInterval(id)
+  }, [loadTenants])
+
+  useEffect(() => {
+    loadQueue()
+    const id = setInterval(loadQueue, 30000)
+    return () => clearInterval(id)
+  }, [loadQueue])
+
+  const refreshAll = () => {
+    loadCore()
+    loadTenants()
+    loadQueue()
+  }
+
+  const changeQueueTab = (tab: FiscalQueueGroup) => {
+    setQueueTab(tab)
+    setQueueOffset(0)
+  }
+
+  const updateSearch = (v: string) => {
+    setSearch(v)
+    setTenantsOffset(0)
+  }
+
+  const updateErrorsOnly = (v: boolean) => {
+    setErrorsOnly(v)
+    setTenantsOffset(0)
+  }
+
+  const updatePendingOnly = (v: boolean) => {
+    setPendingOnly(v)
+    setTenantsOffset(0)
+  }
+
+  const queueItems = queue?.items ?? []
 
   const openTimeline = async (uuid: string) => {
     setTimelineOpen(true)
@@ -168,7 +241,7 @@ export default function OperacionesFiscalesPage() {
     try {
       await fiscalOperationsService.retryDocument(uuid)
       toast.success('Reprocesamiento encolado')
-      load()
+      refreshAll()
     } catch (err) {
       toast.error(fiscalActionErrorMessage(err, 'Error al reprocesar'))
     } finally {
@@ -181,7 +254,7 @@ export default function OperacionesFiscalesPage() {
     try {
       await fiscalOperationsService.cancelDocument(uuid)
       toast.success('Documento cancelado')
-      load()
+      refreshAll()
     } catch {
       toast.error('No se pudo cancelar')
     } finally {
@@ -213,11 +286,11 @@ export default function OperacionesFiscalesPage() {
           <p className="text-sm text-slate-500">Observabilidad multi-tenant — emisión V2 intacta</p>
         </div>
         <div className="flex items-center gap-2">
-          {health && <Badge variant={healthVariant(health.status)}>{health.status.toUpperCase()}</Badge>}
+          {health && <Badge variant={healthVariant(health.status)}>{healthStatusLabel(health.status)}</Badge>}
           {alerts.length > 0 && <Badge variant="red">{alerts.length} alertas</Badge>}
           <button
             type="button"
-            onClick={load}
+            onClick={refreshAll}
             className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-white border border-slate-200 rounded-lg hover:bg-slate-50"
           >
             <RefreshCw size={14} /> Actualizar
@@ -266,7 +339,7 @@ export default function OperacionesFiscalesPage() {
             valueKey="errors"
           />
           <MiniBarChart
-            title="Tiempo prom. por provider (ms)"
+            title="Tiempo prom. por proveedor (ms)"
             rows={summary.charts.avg_duration_by_provider as Array<Record<string, unknown>>}
             labelKey="provider"
             valueKey="avg_ms"
@@ -301,15 +374,15 @@ export default function OperacionesFiscalesPage() {
                 className="pl-7 pr-2 py-1.5 text-sm border rounded-lg"
                 placeholder="Buscar..."
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => updateSearch(e.target.value)}
               />
             </div>
             <label className="text-xs flex items-center gap-1">
-              <input type="checkbox" checked={errorsOnly} onChange={(e) => setErrorsOnly(e.target.checked)} />
+              <input type="checkbox" checked={errorsOnly} onChange={(e) => updateErrorsOnly(e.target.checked)} />
               Solo errores
             </label>
             <label className="text-xs flex items-center gap-1">
-              <input type="checkbox" checked={pendingOnly} onChange={(e) => setPendingOnly(e.target.checked)} />
+              <input type="checkbox" checked={pendingOnly} onChange={(e) => updatePendingOnly(e.target.checked)} />
               Solo pendientes
             </label>
           </div>
@@ -318,7 +391,7 @@ export default function OperacionesFiscalesPage() {
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-slate-600">
               <tr>
-                {['Tenant', 'RUC', 'Modo', 'Proveedor', 'Conexión', 'Pend.', 'Últ. emisión', 'Errores 24h', 'Retries', 'Prom. ms'].map(
+                {['Tenant', 'RUC', 'Modo', 'Proveedor', 'Conexión', 'Pend.', 'Últ. emisión', 'Errores 24h', 'Reintentos 24h', 'Prom. ms'].map(
                   (h) => (
                     <th key={h} className="px-3 py-2 text-left font-medium">
                       {h}
@@ -332,10 +405,10 @@ export default function OperacionesFiscalesPage() {
                 <tr key={`${t.tenant_slug}-${t.ruc}`} className="border-t border-slate-100 hover:bg-slate-50/50">
                   <td className="px-3 py-2 font-medium">{t.tenant_slug}</td>
                   <td className="px-3 py-2">{t.ruc}</td>
-                  <td className="px-3 py-2">{t.send_mode}</td>
+                  <td className="px-3 py-2">{sendModeLabel(t.send_mode)}</td>
                   <td className="px-3 py-2">{t.provider || '—'}</td>
                   <td className="px-3 py-2">
-                    <Badge variant={connVariant(t.connection_status)}>{t.connection_status}</Badge>
+                    <Badge variant={connVariant(t.connection_status)}>{connectionStatusLabel(t.connection_status)}</Badge>
                   </td>
                   <td className="px-3 py-2">{t.pending}</td>
                   <td className="px-3 py-2 text-xs">
@@ -356,6 +429,31 @@ export default function OperacionesFiscalesPage() {
             </tbody>
           </table>
         </CardBody>
+        <div className="flex items-center justify-between px-4 py-3 border-t border-slate-100 text-sm">
+          <span className="text-slate-500">
+            {tenantsTotal > 0
+              ? `Mostrando ${tenantsOffset + 1}-${Math.min(tenantsOffset + TENANTS_PAGE_SIZE, tenantsTotal)} de ${tenantsTotal}`
+              : 'Sin tenants'}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setTenantsOffset((o) => Math.max(0, o - TENANTS_PAGE_SIZE))}
+              disabled={tenantsOffset <= 0}
+              className="inline-flex items-center gap-1 px-3 py-1.5 border rounded-lg disabled:opacity-40"
+            >
+              <ChevronLeft size={16} /> Anterior
+            </button>
+            <button
+              type="button"
+              onClick={() => setTenantsOffset((o) => o + TENANTS_PAGE_SIZE)}
+              disabled={tenantsOffset + TENANTS_PAGE_SIZE >= tenantsTotal}
+              className="inline-flex items-center gap-1 px-3 py-1.5 border rounded-lg disabled:opacity-40"
+            >
+              Siguiente <ChevronRight size={16} />
+            </button>
+          </div>
+        </div>
       </Card>
 
       <Card>
@@ -374,12 +472,12 @@ export default function OperacionesFiscalesPage() {
               <button
                 key={tab}
                 type="button"
-                onClick={() => setQueueTab(tab)}
+                onClick={() => changeQueueTab(tab)}
                 className={`px-3 py-1 text-xs rounded-full border ${
                   queueTab === tab ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600'
                 }`}
               >
-                {tab} ({queue ? queue[`${tab}_count`] : 0})
+                {queueTabLabel(tab)} ({queue?.counts[tab] ?? 0})
               </button>
             ))}
           </div>
@@ -479,6 +577,31 @@ export default function OperacionesFiscalesPage() {
             </table>
           </div>
         </CardBody>
+        <div className="flex items-center justify-between px-4 py-3 border-t border-slate-100 text-sm">
+          <span className="text-slate-500">
+            {queue && queue.total > 0
+              ? `Mostrando ${queueOffset + 1}-${Math.min(queueOffset + QUEUE_PAGE_SIZE, queue.total)} de ${queue.total}`
+              : 'Sin documentos'}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setQueueOffset((o) => Math.max(0, o - QUEUE_PAGE_SIZE))}
+              disabled={queueOffset <= 0}
+              className="inline-flex items-center gap-1 px-3 py-1.5 border rounded-lg disabled:opacity-40"
+            >
+              <ChevronLeft size={16} /> Anterior
+            </button>
+            <button
+              type="button"
+              onClick={() => setQueueOffset((o) => o + QUEUE_PAGE_SIZE)}
+              disabled={!queue || queueOffset + QUEUE_PAGE_SIZE >= queue.total}
+              className="inline-flex items-center gap-1 px-3 py-1.5 border rounded-lg disabled:opacity-40"
+            >
+              Siguiente <ChevronRight size={16} />
+            </button>
+          </div>
+        </div>
       </Card>
 
       <Modal open={timelineOpen} onClose={() => setTimelineOpen(false)} title="Timeline fiscal">

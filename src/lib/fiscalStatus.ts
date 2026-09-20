@@ -146,3 +146,68 @@ export function fiscalActionErrorMessage(err: unknown, fallback: string): string
   }
   return apiErrorMessage(err, fallback)
 }
+
+/**
+ * Traducciones de enums crudos del backend a texto en español para mostrar al operador.
+ * Son SOLO traducción de presentación (mismo valor 1:1, nunca reclasifican nada) — la lista
+ * de valores posibles de cada enum está confirmada contra el código real de facturador_lycet
+ * (Empresa::connectionStatus, FiscalHealthService, FiscalEmailProcessor/FiscalCustomerEmailNormalizer).
+ */
+
+const CONNECTION_STATUS_LABELS: Record<string, string> = {
+  connected: 'Conectado',
+  testing: 'Probando…',
+  invalid_credentials: 'Credenciales inválidas',
+  configuration_missing: 'Configuración incompleta',
+  certificate_expired: 'Certificado vencido',
+  error: 'Error de conexión',
+}
+
+export function connectionStatusLabel(status: string | null | undefined): string {
+  if (!status) return 'Sin configurar'
+  return CONNECTION_STATUS_LABELS[status] ?? status
+}
+
+const HEALTH_STATUS_LABELS: Record<string, string> = {
+  healthy: 'Saludable',
+  degraded: 'Degradado',
+  critical: 'Crítico',
+}
+
+export function healthStatusLabel(status: string | null | undefined): string {
+  if (!status) return '—'
+  return HEALTH_STATUS_LABELS[status] ?? status
+}
+
+const SEND_MODE_LABELS: Record<string, string> = {
+  sunat_direct: 'SUNAT directo',
+  pse: 'PSE',
+}
+
+export function sendModeLabel(mode: string | null | undefined): string {
+  if (!mode) return '—'
+  return SEND_MODE_LABELS[mode] ?? mode
+}
+
+const EMAIL_STATUS_LABELS: Record<string, string> = {
+  sent: 'Enviado',
+  failed: 'Falló',
+  invalid: 'Correo inválido',
+  email_not_available: 'Sin correo',
+}
+
+export function emailStatusLabel(status: string | null | undefined): string {
+  if (!status) return 'Pendiente'
+  return EMAIL_STATUS_LABELS[status] ?? status
+}
+
+const QUEUE_TAB_LABELS: Record<string, string> = {
+  queued: 'En cola',
+  processing: 'Procesando',
+  failed: 'Con error',
+  retrying: 'Reintentando',
+}
+
+export function queueTabLabel(tab: string): string {
+  return QUEUE_TAB_LABELS[tab] ?? tab
+}

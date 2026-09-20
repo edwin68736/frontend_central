@@ -5,6 +5,11 @@ import {
   needsForceConfirmation,
   fiscalExplanation,
   retryProgressLabel,
+  connectionStatusLabel,
+  healthStatusLabel,
+  sendModeLabel,
+  emailStatusLabel,
+  queueTabLabel,
 } from './fiscalStatus'
 
 describe('fiscalGroup — Fase 3, semántica visual única (frontend NO reclasifica por texto)', () => {
@@ -142,5 +147,48 @@ describe('retryProgressLabel — usa retry_count real, sin contador propio ni l�
 
   it('Test 4 (cont.): agotado se marca a partir de retryable, no de comparar contra 5', () => {
     expect(retryProgressLabel(5, 'transient', false)).toBe('Intentos: 5 (automático agotado)')
+  })
+})
+
+describe('Traducciones de enums crudos del backend — /fiscal-operations y /fiscal mostraban valores en inglés', () => {
+  it('connectionStatusLabel traduce los 6 valores reales de Empresa::connectionStatus', () => {
+    expect(connectionStatusLabel('connected')).toBe('Conectado')
+    expect(connectionStatusLabel('testing')).toBe('Probando…')
+    expect(connectionStatusLabel('invalid_credentials')).toBe('Credenciales inválidas')
+    expect(connectionStatusLabel('configuration_missing')).toBe('Configuración incompleta')
+    expect(connectionStatusLabel('certificate_expired')).toBe('Certificado vencido')
+    expect(connectionStatusLabel('error')).toBe('Error de conexión')
+  })
+
+  it('connectionStatusLabel no rompe con un valor nuevo no mapeado (fallback al valor crudo, no inventa texto)', () => {
+    expect(connectionStatusLabel('algo_nuevo')).toBe('algo_nuevo')
+    expect(connectionStatusLabel(null)).toBe('Sin configurar')
+  })
+
+  it('healthStatusLabel traduce los 3 valores de FiscalHealthService::resolveOverallStatus', () => {
+    expect(healthStatusLabel('healthy')).toBe('Saludable')
+    expect(healthStatusLabel('degraded')).toBe('Degradado')
+    expect(healthStatusLabel('critical')).toBe('Crítico')
+  })
+
+  it('sendModeLabel traduce sunat_direct/pse', () => {
+    expect(sendModeLabel('sunat_direct')).toBe('SUNAT directo')
+    expect(sendModeLabel('pse')).toBe('PSE')
+    expect(sendModeLabel(null)).toBe('—')
+  })
+
+  it('emailStatusLabel traduce los 4 valores reales de FiscalEmailProcessor', () => {
+    expect(emailStatusLabel('sent')).toBe('Enviado')
+    expect(emailStatusLabel('failed')).toBe('Falló')
+    expect(emailStatusLabel('invalid')).toBe('Correo inválido')
+    expect(emailStatusLabel('email_not_available')).toBe('Sin correo')
+    expect(emailStatusLabel(null)).toBe('Pendiente')
+  })
+
+  it('queueTabLabel traduce las 4 pestañas de la cola de OperacionesFiscalesPage', () => {
+    expect(queueTabLabel('queued')).toBe('En cola')
+    expect(queueTabLabel('processing')).toBe('Procesando')
+    expect(queueTabLabel('failed')).toBe('Con error')
+    expect(queueTabLabel('retrying')).toBe('Reintentando')
   })
 })

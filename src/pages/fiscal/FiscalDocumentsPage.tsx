@@ -34,6 +34,8 @@ import {
   fiscalExplanation,
   retryProgressLabel,
   fiscalActionErrorMessage,
+  sendModeLabel,
+  emailStatusLabel,
 } from '@/lib/fiscalStatus'
 
 const STORAGE_KEY = 'sa_fiscal_filters_v1'
@@ -397,7 +399,7 @@ export default function FiscalDocumentsPage() {
             value={filters.provider || ''}
             onChange={(e) => setFilters((f) => ({ ...f, provider: e.target.value || undefined }))}
           >
-            <option value="">Provider</option>
+            <option value="">Proveedor</option>
             <option value="sunat">SUNAT</option>
             <option value="pse">PSE</option>
           </select>
@@ -481,7 +483,7 @@ export default function FiscalDocumentsPage() {
                 <th className="p-3 text-left">Cliente</th>
                 <th className="p-3 text-left">Fecha</th>
                 <th className="p-3 text-left">Estado</th>
-                <th className="p-3 text-left">Provider</th>
+                <th className="p-3 text-left">Proveedor</th>
                 <th className="p-3 text-right">Monto</th>
                 <th className="p-3 text-left">Email</th>
                 <th className="p-3 text-center">Retry</th>
@@ -517,9 +519,9 @@ export default function FiscalDocumentsPage() {
                       return <Badge variant={g.variant}>{g.label}</Badge>
                     })()}
                   </td>
-                  <td className="p-3">{doc.provider || doc.send_mode || '—'}</td>
+                  <td className="p-3">{doc.provider || sendModeLabel(doc.send_mode)}</td>
                   <td className="p-3 text-right">{doc.total != null ? Number(doc.total).toFixed(2) : '—'}</td>
-                  <td className="p-3">{doc.email_status || '—'}</td>
+                  <td className="p-3">{emailStatusLabel(doc.email_status)}</td>
                   <td className="p-3 text-center">{doc.retry_count}</td>
                 </tr>
               ))}

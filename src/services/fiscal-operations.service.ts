@@ -81,15 +81,21 @@ export interface FiscalQueueItem {
   created_at: string
 }
 
+export type FiscalQueueGroup = 'queued' | 'processing' | 'failed' | 'retrying'
+
+/**
+ * Fase 8 (paginación): antes traía SIEMPRE los 4 buckets a la vez con un tope fijo de 50 cada
+ * uno, sin forma de ver más ni de paginar. Ahora se pide UN bucket (`group`) a la vez, paginado
+ * de verdad (`total`/`limit`/`offset`), más los 4 contadores livianos (`counts`) para que las
+ * pestañas sigan mostrando el total de cada una sin tener que traer sus items.
+ */
 export interface FiscalQueueMonitor {
-  queued: FiscalQueueItem[]
-  queued_count: number
-  processing: FiscalQueueItem[]
-  processing_count: number
-  failed: FiscalQueueItem[]
-  failed_count: number
-  retrying: FiscalQueueItem[]
-  retrying_count: number
+  group: FiscalQueueGroup
+  items: FiscalQueueItem[]
+  total: number
+  limit: number
+  offset: number
+  counts: Record<FiscalQueueGroup, number>
   redis: { emit_queue: number; retry_scheduled: number }
 }
 
@@ -110,7 +116,7 @@ export interface FiscalAuditTimeline {
   merged_timeline?: Array<Record<string, unknown>>
 }
 
-const qs = (params: Record<string, string | boolean | undefined>) => {
+const qs = (params: Record<string, string | number | boolean | undefined>) => {
   const p = new URLSearchParams()
   Object.entries(params).forEach(([k, v]) => {
     if (v === undefined || v === null || v === '') return
@@ -133,14 +139,19 @@ export const fiscalOperationsService = {
     errors_only?: boolean
     pending_only?: boolean
     q?: string
+    limit?: number
+    offset?: number
   } = {}) =>
     api
-      .get<{ items: FiscalTenantOperation[]; total: number }>(
+      .get<{ items: FiscalTenantOperation[]; total: number; limit: number; offset: number }>(
         `/superadmin/fiscal/operations/tenants?${qs(filters)}`
       )
       .then((r) => r.data),
 
-  getQueue: () => api.get<FiscalQueueMonitor>('/superadmin/fiscal/operations/queue').then((r) => r.data),
+  getQueue: (params: { group: FiscalQueueGroup; limit?: number; offset?: number }) =>
+    api
+      .get<FiscalQueueMonitor>(`/superadmin/fiscal/operations/queue?${qs(params)}`)
+      .then((r) => r.data),
 
   getAlerts: () =>
     api.get<{ open_count: number; items: FiscalAlertItem[] }>('/superadmin/fiscal/alerts').then((r) => r.data),
