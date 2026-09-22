@@ -102,7 +102,7 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard label="Total Empresas" value={stats.total} icon={Building2} color="bg-blue-500" />
         <StatCard label="Activas" value={stats.active} icon={CheckCircle} color="bg-emerald-500" />
-        <StatCard label="Suspendidas" value={stats.inactive} icon={XCircle} color="bg-red-500" />
+        <StatCard label="Inactivas" value={stats.inactive} icon={XCircle} color="bg-slate-500" />
         <StatCard label="Con plan asignado" value={withPlan} icon={TrendingUp} color="bg-violet-500" />
       </div>
 

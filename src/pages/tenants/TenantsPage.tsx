@@ -39,10 +39,13 @@ import PaginationBar from '@/components/ui/PaginationBar'
 import type { PerPageOption } from '@/services/pagination'
 
 /* ─── helpers ─────────────────────────────────────────────── */
+// 'inactive' (apagado a mano por un admin, botón Activar/Desactivar de esta página) y
+// 'suspended' (motor de facturación: mora, ChargeReconnectionFee lo usa) son estados
+// DISTINTOS — no deben compartir la palabra "Suspendido" en pantalla, se confundían entre sí.
 const statusVariant = (s: string) =>
-  s === 'active' ? 'green' : s === 'inactive' ? 'red' : 'yellow'
+  s === 'active' ? 'green' : s === 'suspended' ? 'red' : s === 'inactive' ? 'gray' : 'yellow'
 const statusLabel = (s: string) =>
-  s === 'active' ? 'Activo' : s === 'inactive' ? 'Suspendido' : s
+  s === 'active' ? 'Activo' : s === 'suspended' ? 'Suspendido' : s === 'inactive' ? 'Inactivo' : s
 
 /** "2026-09-02T..." → "02 sep 2026". Vacío/inválido → '—'. */
 const formatDateOnly = (iso?: string | null) => {
@@ -829,7 +832,7 @@ export default function TenantsPage() {
     const newStatus = t.status === 'active' ? 'inactive' : 'active'
     try {
       await tenantsService.setStatus(t.id, newStatus)
-      toast.success(`Empresa ${newStatus === 'active' ? 'activada' : 'suspendida'}`)
+      toast.success(`Empresa ${newStatus === 'active' ? 'activada' : 'desactivada'}`)
       fetchTenants()
     } catch {
       toast.error('Error cambiando estado')
@@ -1138,7 +1141,7 @@ export default function TenantsPage() {
             >
               <option value="">Todos los estados</option>
               <option value="active">Activos</option>
-              <option value="inactive">Suspendidos</option>
+              <option value="inactive">Inactivos</option>
             </select>
             <ChevronDown size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
           </div>
@@ -1341,7 +1344,7 @@ export default function TenantsPage() {
                           },
                           {
                             key: 'toggle',
-                            label: t.status === 'active' ? 'Suspender' : 'Activar',
+                            label: t.status === 'active' ? 'Desactivar' : 'Activar',
                             icon: (
                               <Power
                                 size={15}
@@ -1811,7 +1814,7 @@ export default function TenantsPage() {
             <FormField label="Estado *" error={editForm.formState.errors.status?.message}>
               <select {...editForm.register('status')} className={inputClass}>
                 <option value="active">Activo</option>
-                <option value="inactive">Suspendido</option>
+                <option value="inactive">Inactivo</option>
               </select>
             </FormField>
             <FormField label="Régimen tributario *" error={editForm.formState.errors.taxpayer_regime?.message}>
