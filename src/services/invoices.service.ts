@@ -23,6 +23,9 @@ export interface SaasInvoice {
   period_end: string
   due_date: string
   amount: number
+  /** Cargo de reconexión de este ciclo (0 si no aplica) — ver ChargeReconnectionFee. El total a
+   *  cobrar cuando el tenant está suspendido es amount + reconnection_fee, no solo amount. */
+  reconnection_fee: number
   currency: string
   /** pending | overdue | paid | rejected (rejected = anulado) */
   status: string

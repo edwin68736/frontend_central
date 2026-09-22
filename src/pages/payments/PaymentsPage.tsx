@@ -166,6 +166,8 @@ export default function PaymentsPage() {
   const [cancelTarget, setCancelTarget] = useState<SaasInvoice | null>(null)
   /** Cobros que este pago puede cancelar (los que siguen por cobrar). */
   const [payableInvoices, setPayableInvoices] = useState<SaasInvoice[]>([])
+  /** Cobro elegido en "Cobro que cancela" — para desglosar plan/reconexión debajo del select. */
+  const selectedPayableInvoice = payableInvoices.find(i => i.id === newPaymentForm.billing_cycle_id) ?? null
   /** Pestaña activa: pagos recibidos o cobros emitidos. */
   const [tab, setTab] = useState<'payments' | 'invoices'>('payments')
   const [issuedInvoices, setIssuedInvoices] = useState<SaasInvoice[]>([])
@@ -713,6 +715,11 @@ export default function PaymentsPage() {
                   </td>
                   <td className="px-4 py-3 font-semibold text-slate-800">
                     {p.currency} {p.amount.toFixed(2)}
+                    {p.reconnection_fee > 0 && (
+                      <div className="text-xs font-normal text-amber-700">
+                        incl. S/ {p.reconnection_fee.toFixed(2)} reconexión
+                      </div>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-slate-600">
                     {p.period_months} {p.period_months === 1 ? 'mes' : 'meses'}
@@ -983,7 +990,9 @@ export default function PaymentsPage() {
               </option>
               {payableInvoices.map(inv => (
                 <option key={inv.id} value={inv.id}>
-                  {fmtDay(inv.period_start)} → {fmtDay(inv.period_end)} · S/ {inv.amount.toFixed(2)}
+                  {fmtDay(inv.period_start)} → {fmtDay(inv.period_end)} · S/{' '}
+                  {(inv.amount + (inv.reconnection_fee || 0)).toFixed(2)}
+                  {inv.reconnection_fee > 0 ? ' (incluye reconexión)' : ''}
                 </option>
               ))}
             </select>
@@ -991,6 +1000,24 @@ export default function PaymentsPage() {
               <p className="text-xs text-slate-500 mt-1">
                 Al aplicarlo, ese cobro queda marcado como pagado.
               </p>
+            )}
+            {selectedPayableInvoice && selectedPayableInvoice.reconnection_fee > 0 && (
+              <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs space-y-1">
+                <div className="flex justify-between text-slate-700">
+                  <span>Plan</span>
+                  <span>S/ {selectedPayableInvoice.amount.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between font-medium text-amber-800">
+                  <span>Reconexión (empresa suspendida)</span>
+                  <span>+S/ {selectedPayableInvoice.reconnection_fee.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between font-semibold text-slate-900 pt-1 border-t border-amber-200">
+                  <span>Total a cobrar</span>
+                  <span>
+                    S/ {(selectedPayableInvoice.amount + selectedPayableInvoice.reconnection_fee).toFixed(2)}
+                  </span>
+                </div>
+              </div>
             )}
           </div>
 
@@ -1071,6 +1098,47 @@ export default function PaymentsPage() {
               ) : null}
             </div>
           )}
+
+          {/* Desglose plan/reconexión: reconnection_fee es lo que el sistema calculó que
+              correspondía al enviar el pago (congelado en SubmitPayment), no lo que el tenant
+              escribió en "amount" — por eso puede no alcanzar, y ApprovePayment lo rechaza
+              server-side si no cubre cycle_amount + reconnection_fee. Se avisa acá ANTES de
+              que el admin le dé aprobar y se encuentre con el error. */}
+          {selectedPayment && selectedPayment.reconnection_fee > 0 && (() => {
+            const requiredTotal = (selectedPayment.cycle_amount ?? 0) + selectedPayment.reconnection_fee
+            const insufficient =
+              selectedPayment.cycle_amount != null && selectedPayment.amount + 0.009 < requiredTotal
+            return (
+              <div
+                className={`rounded-lg border px-3 py-2.5 text-sm space-y-1 ${
+                  insufficient ? 'border-red-300 bg-red-50' : 'border-amber-200 bg-amber-50'
+                }`}
+              >
+                {selectedPayment.cycle_amount != null && (
+                  <div className="flex justify-between text-slate-700">
+                    <span>Plan</span>
+                    <span>S/ {selectedPayment.cycle_amount.toFixed(2)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between font-medium text-amber-800">
+                  <span>Reconexión (empresa suspendida)</span>
+                  <span>+S/ {selectedPayment.reconnection_fee.toFixed(2)}</span>
+                </div>
+                {selectedPayment.cycle_amount != null && (
+                  <div className="flex justify-between font-semibold text-slate-900 pt-1 border-t border-amber-200">
+                    <span>Total requerido</span>
+                    <span>S/ {requiredTotal.toFixed(2)}</span>
+                  </div>
+                )}
+                {insufficient && (
+                  <p className="text-red-700 font-medium pt-1">
+                    ⚠ El monto enviado (S/ {selectedPayment.amount.toFixed(2)}) no cubre el total
+                    requerido — el sistema rechazará la aprobación hasta que se regularice.
+                  </p>
+                )}
+              </div>
+            )
+          })()}
 
           {reviewAction === 'approve' && (
             <>

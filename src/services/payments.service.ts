@@ -26,7 +26,16 @@ export interface SaasPayment {
   tenant_slug: string
   tenant_ruc?: string
   subscription_id: number | null
+  billing_cycle_id?: number | null
   amount: number
+  /** Recargo de reconexión que este pago debía cubrir (congelado al enviarlo, ver
+   *  SubmitPayment) — 0 si el tenant no estaba suspendido en ese momento. No es lo que el
+   *  tenant escribió en "amount", es lo que el sistema calculó que correspondía. */
+  reconnection_fee: number
+  /** Monto BASE del ciclo (plan, sin reconexión) que este pago cancela — solo si
+   *  billing_cycle_id está seteado. Junto con reconnection_fee arma el desglose plan/reconexión
+   *  en el panel (ver PaymentDetail.CycleAmount en el backend). */
+  cycle_amount?: number | null
   currency: string
   period_months: number
   receipt_url: string
