@@ -4,6 +4,8 @@ export interface SAStats {
   total: number
   active: number
   inactive: number
+  /** Suspendidos por mora (motor de facturación) — distinto de `inactive` (apagado a mano). */
+  suspended: number
   /** Conteo por plan real de la suscripción vigente: claves "plan_<nombre>" (dinámicas). */
   [key: string]: number
 }

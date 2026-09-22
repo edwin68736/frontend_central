@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Building2, CheckCircle, XCircle, TrendingUp, ArrowRight, GitBranch, AlertTriangle } from 'lucide-react'
+import { Building2, CheckCircle, XCircle, ShieldAlert, TrendingUp, ArrowRight, GitBranch, AlertTriangle } from 'lucide-react'
 import { dashboardService, DashboardData } from '@/services/dashboard.service'
 import { migrationsService, type MigrationSummary } from '@/services/migrations.service'
 import { Card, CardBody, CardHeader } from '@/components/ui/Card'
@@ -34,11 +34,13 @@ function StatCard({
   )
 }
 
+// Mismo criterio que TenantsPage: 'suspended' (mora) e 'inactive' (apagado a mano) son
+// estados distintos, no deben compartir color ni texto.
 const statusVariant = (s: string) =>
-  s === 'active' ? 'green' : s === 'inactive' ? 'red' : 'yellow'
+  s === 'active' ? 'green' : s === 'suspended' ? 'red' : s === 'inactive' ? 'gray' : 'yellow'
 
 const statusLabel = (s: string) =>
-  s === 'active' ? 'Activo' : s === 'inactive' ? 'Inactivo' : s
+  s === 'active' ? 'Activo' : s === 'suspended' ? 'Suspendido' : s === 'inactive' ? 'Inactivo' : s
 
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null)
@@ -99,9 +101,10 @@ export default function DashboardPage() {
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         <StatCard label="Total Empresas" value={stats.total} icon={Building2} color="bg-blue-500" />
         <StatCard label="Activas" value={stats.active} icon={CheckCircle} color="bg-emerald-500" />
+        <StatCard label="Suspendidas" value={stats.suspended} icon={ShieldAlert} color="bg-red-500" />
         <StatCard label="Inactivas" value={stats.inactive} icon={XCircle} color="bg-slate-500" />
         <StatCard label="Con plan asignado" value={withPlan} icon={TrendingUp} color="bg-violet-500" />
       </div>
