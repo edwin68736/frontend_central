@@ -155,6 +155,9 @@ export default function PaymentsPage() {
   const [reviewPlanId, setReviewPlanId] = useState(0)
   const [reviewPeriodMonths, setReviewPeriodMonths] = useState(0)
   const [reviewNotes, setReviewNotes] = useState('')
+  /** Excepción del panel central: condonar o descontar el recargo de reconexión al aprobar. */
+  const [reviewWaiveFee, setReviewWaiveFee] = useState(false)
+  const [reviewFeeAmount, setReviewFeeAmount] = useState('')
   /** Boleta/factura (PDF) que se adjunta en el mismo paso de aprobar — ya no hace falta volver
    *  a entrar al pago después para subirla. */
   const [reviewFiscalDoc, setReviewFiscalDoc] = useState<File | null>(null)
@@ -168,6 +171,9 @@ export default function PaymentsPage() {
   const [payableInvoices, setPayableInvoices] = useState<SaasInvoice[]>([])
   /** Cobro elegido en "Cobro que cancela" — para desglosar plan/reconexión debajo del select. */
   const selectedPayableInvoice = payableInvoices.find(i => i.id === newPaymentForm.billing_cycle_id) ?? null
+  /** Excepción del panel central: condonar o descontar el recargo al registrar el pago. */
+  const [createWaiveFee, setCreateWaiveFee] = useState(false)
+  const [createFeeAmount, setCreateFeeAmount] = useState('')
   /** Pestaña activa: pagos recibidos o cobros emitidos. */
   const [tab, setTab] = useState<'payments' | 'invoices'>('payments')
   const [issuedInvoices, setIssuedInvoices] = useState<SaasInvoice[]>([])
@@ -380,6 +386,13 @@ export default function PaymentsPage() {
 
   useEffect(() => { load() }, [filterStatus, invoiceFilter, debouncedSearch, dateFrom, dateTo, paymentsPage, invoicesPage])
 
+  // Cambió el cobro elegido: resetea la excepción de reconexión (el "original" de referencia
+  // es distinto por cobro) en vez de arrastrar un monto que ya no corresponde.
+  useEffect(() => {
+    setCreateWaiveFee(false)
+    setCreateFeeAmount(String(selectedPayableInvoice?.reconnection_fee ?? 0))
+  }, [selectedPayableInvoice?.id])
+
   // Cobros por cancelar de la empresa elegida en el registro manual.
   useEffect(() => {
     if (!showCreateModal || !newPaymentForm.tenant_id) {
@@ -405,6 +418,9 @@ export default function PaymentsPage() {
     fd.append('payment_method', newPaymentForm.payment_method)
     if (newPaymentForm.billing_cycle_id) {
       fd.append('billing_cycle_id', String(newPaymentForm.billing_cycle_id))
+    }
+    if (createWaiveFee) {
+      fd.append('reconnection_fee_override', String(Number(createFeeAmount) || 0))
     }
     if (newPaymentForm.file) fd.append('receipt', newPaymentForm.file)
 
@@ -432,6 +448,8 @@ export default function PaymentsPage() {
     // lo puede corregir antes de confirmar. 0 en el payment (pagos viejos, previos a esta
     // mejora) deja el campo en 0 = "usar lo que ya venga calculado" (fallback del backend).
     setReviewPeriodMonths(payment.period_months || 0)
+    setReviewWaiveFee(false)
+    setReviewFeeAmount(String(payment.reconnection_fee || 0))
     setShowReviewModal(true)
   }
 
@@ -440,7 +458,8 @@ export default function PaymentsPage() {
     setSaving(true)
     try {
       if (reviewAction === 'approve') {
-        await paymentsService.approve(selectedPayment.id, reviewPlanId, reviewNotes, reviewPeriodMonths)
+        const feeOverride = reviewWaiveFee ? Number(reviewFeeAmount) || 0 : undefined
+        await paymentsService.approve(selectedPayment.id, reviewPlanId, reviewNotes, reviewPeriodMonths, feeOverride)
         // La boleta/factura es un paso aparte (adjunta un archivo, la aprobación no) — si falla,
         // el pago ya quedó aprobado igual: se avisa distinto para que quede claro que falta
         // reintentar el PDF, no repetir la aprobación. El botón «Adjuntar comprobante» de la
@@ -1001,22 +1020,49 @@ export default function PaymentsPage() {
                 Al aplicarlo, ese cobro queda marcado como pagado.
               </p>
             )}
+            {selectedPayableInvoice && selectedPayableInvoice.reconnection_fee > 0 && (() => {
+              const effectiveFee = createWaiveFee ? Number(createFeeAmount) || 0 : selectedPayableInvoice.reconnection_fee
+              return (
+                <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs space-y-1">
+                  <div className="flex justify-between text-slate-700">
+                    <span>Plan</span>
+                    <span>S/ {selectedPayableInvoice.amount.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between font-medium text-amber-800">
+                    <span>Reconexión (empresa suspendida){createWaiveFee ? ' — ajustada' : ''}</span>
+                    <span>+S/ {effectiveFee.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between font-semibold text-slate-900 pt-1 border-t border-amber-200">
+                    <span>Total a cobrar</span>
+                    <span>S/ {(selectedPayableInvoice.amount + effectiveFee).toFixed(2)}</span>
+                  </div>
+                </div>
+              )
+            })()}
+            {/* Excepción SOLO del panel central — igual criterio que en "Aprobar pago". */}
             {selectedPayableInvoice && selectedPayableInvoice.reconnection_fee > 0 && (
-              <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs space-y-1">
-                <div className="flex justify-between text-slate-700">
-                  <span>Plan</span>
-                  <span>S/ {selectedPayableInvoice.amount.toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between font-medium text-amber-800">
-                  <span>Reconexión (empresa suspendida)</span>
-                  <span>+S/ {selectedPayableInvoice.reconnection_fee.toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between font-semibold text-slate-900 pt-1 border-t border-amber-200">
-                  <span>Total a cobrar</span>
-                  <span>
-                    S/ {(selectedPayableInvoice.amount + selectedPayableInvoice.reconnection_fee).toFixed(2)}
-                  </span>
-                </div>
+              <div className="mt-2 rounded-lg border border-slate-200 px-3 py-2 space-y-2">
+                <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={createWaiveFee}
+                    onChange={e => setCreateWaiveFee(e.target.checked)}
+                  />
+                  Condonar o descontar el recargo de reconexión
+                </label>
+                {createWaiveFee && (
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">
+                      Recargo a cobrar (S/) — 0 = condonar del todo
+                    </label>
+                    <input
+                      type="number" min={0} max={selectedPayableInvoice.reconnection_fee} step="0.01"
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-slate-800 text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                      value={createFeeAmount}
+                      onChange={e => setCreateFeeAmount(e.target.value)}
+                    />
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1105,7 +1151,11 @@ export default function PaymentsPage() {
               server-side si no cubre cycle_amount + reconnection_fee. Se avisa acá ANTES de
               que el admin le dé aprobar y se encuentre con el error. */}
           {selectedPayment && selectedPayment.reconnection_fee > 0 && (() => {
-            const requiredTotal = (selectedPayment.cycle_amount ?? 0) + selectedPayment.reconnection_fee
+            // Refleja en vivo la condonación/descuento que el admin esté armando abajo, para
+            // que el desglose (y el aviso de insuficiente) respondan al cambio sin esperar a
+            // que envíe el formulario.
+            const effectiveFee = reviewWaiveFee ? Number(reviewFeeAmount) || 0 : selectedPayment.reconnection_fee
+            const requiredTotal = (selectedPayment.cycle_amount ?? 0) + effectiveFee
             const insufficient =
               selectedPayment.cycle_amount != null && selectedPayment.amount + 0.009 < requiredTotal
             return (
@@ -1121,8 +1171,8 @@ export default function PaymentsPage() {
                   </div>
                 )}
                 <div className="flex justify-between font-medium text-amber-800">
-                  <span>Reconexión (empresa suspendida)</span>
-                  <span>+S/ {selectedPayment.reconnection_fee.toFixed(2)}</span>
+                  <span>Reconexión (empresa suspendida){reviewWaiveFee ? ' — ajustada' : ''}</span>
+                  <span>+S/ {effectiveFee.toFixed(2)}</span>
                 </div>
                 {selectedPayment.cycle_amount != null && (
                   <div className="flex justify-between font-semibold text-slate-900 pt-1 border-t border-amber-200">
@@ -1139,6 +1189,38 @@ export default function PaymentsPage() {
               </div>
             )
           })()}
+
+          {/* Excepción SOLO del panel central: nunca hay un camino tenant-facing que llegue a
+              reconnection_fee_override — condonar/descontar es siempre decisión de un admin acá. */}
+          {reviewAction === 'approve' && selectedPayment && selectedPayment.reconnection_fee > 0 && (
+            <div className="rounded-lg border border-slate-200 px-3 py-2.5 space-y-2">
+              <label className="flex items-center gap-2 text-sm font-medium text-slate-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={reviewWaiveFee}
+                  onChange={e => setReviewWaiveFee(e.target.checked)}
+                />
+                Condonar o descontar el recargo de reconexión
+              </label>
+              {reviewWaiveFee && (
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">
+                    Recargo a cobrar (S/) — 0 = condonar del todo
+                  </label>
+                  <input
+                    type="number" min={0} max={selectedPayment.reconnection_fee} step="0.01"
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-slate-800 text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                    value={reviewFeeAmount}
+                    onChange={e => setReviewFeeAmount(e.target.value)}
+                  />
+                  <p className="text-xs text-slate-500 mt-1">
+                    Original: S/ {selectedPayment.reconnection_fee.toFixed(2)}. Queda registrado en el
+                    historial del pago.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
 
           {reviewAction === 'approve' && (
             <>

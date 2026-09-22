@@ -128,12 +128,21 @@ export const paymentsService = {
   },
 
   /** periodMonths opcional: 0/omitido deja que el backend use lo que pidió el tenant
-   * (payment.period_months) en vez de forzar 1 mes. */
-  async approve(id: number, planId: number, adminNotes: string, periodMonths = 0): Promise<void> {
+   * (payment.period_months) en vez de forzar 1 mes.
+   * reconnectionFeeOverride: excepción SOLO del panel central para condonar (0) o descontar
+   * el recargo de reconexión — undefined deja el recargo completo, como siempre. */
+  async approve(
+    id: number,
+    planId: number,
+    adminNotes: string,
+    periodMonths = 0,
+    reconnectionFeeOverride?: number,
+  ): Promise<void> {
     await api.patch(`/superadmin/payments/${id}/approve`, {
       plan_id: planId,
       admin_notes: adminNotes,
       period_months: periodMonths,
+      reconnection_fee_override: reconnectionFeeOverride,
     })
   },
 
