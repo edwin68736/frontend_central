@@ -134,6 +134,26 @@ export function retryProgressLabel(
 }
 
 /**
+ * "Atendido" (2026-09-22): decisión ADMINISTRATIVA de que un documento ya fue revisado y no
+ * necesita más acción — independiente por completo del status técnico SUNAT/PSE que resuelve
+ * `fiscalGroup()`. Deliberadamente NO se mezcla con esa función ni con su semántica de color: un
+ * documento puede seguir "Rechazado" (así lo ve SUNAT, para siempre) y a la vez estar "Atendido"
+ * (un admin ya lo resolvió). Ver facturador_lycet FiscalController::ATTENDABLE_STATUSES — mismos
+ * 4 valores acá, para habilitar/deshabilitar el botón "Marcar atendido" sin esperar el 409.
+ */
+const ATTENDABLE_STATUSES = ['error', 'rejected', 'observed', 'cancelled']
+
+export function isAttendable(status: string): boolean {
+  return ATTENDABLE_STATUSES.includes(status)
+}
+
+export function attendedBadge(attended: boolean | null | undefined): FiscalGroup {
+  return attended
+    ? { label: 'Atendido', variant: 'gray' }
+    : { label: 'No atendido', variant: 'blue' }
+}
+
+/**
  * Mensaje de error para acciones fiscales (send/retry/force/...), incluyendo el `hint` que
  * devuelve el backend en un 409 por guard (Fase 1) además del `error` genérico. Reutiliza
  * `apiErrorMessage` como base en vez de reimplementar la extracción — solo agrega el `hint`.
@@ -218,6 +238,8 @@ const ACTION_LABELS: Record<string, string> = {
   force: 'Forzar',
   poll: 'Consultar',
   email: 'Correo',
+  attend: 'Marcar atendido',
+  unattend: 'Quitar atendido',
 }
 
 export function actionLabel(action: string): string {

@@ -42,6 +42,11 @@ export interface FiscalDocumentSummary {
   next_retry_at?: string | null
   created_at: string
   accepted_at: string | null
+  /** "Atendido" (2026-09-22): decisión administrativa independiente del status técnico SUNAT/PSE — ver src/lib/fiscalStatus.ts. */
+  attended?: boolean
+  attended_reason?: string | null
+  attended_by?: string | null
+  attended_at?: string | null
 }
 
 export interface FiscalDocumentsResponse {
@@ -84,6 +89,9 @@ export interface FiscalFilters {
   pending_only?: boolean
   retry_only?: boolean
   email_sent?: boolean
+  /** Mutuamente excluyentes en la UI — separado deliberadamente de `group`/`status` (no es un estado técnico). */
+  attended_only?: boolean
+  unattended_only?: boolean
   limit?: number
   offset?: number
   cursor?: string
@@ -121,6 +129,15 @@ export const fiscalService = {
 
   documentAction: (uuid: string, action: 'send' | 'retry' | 'force' | 'email' | 'poll') =>
     api.post(`/superadmin/fiscal/documents/${uuid}/${action}`).then((r) => r.data),
+
+  /** Solo permitido si el documento está en un status terminal (error/rejected/observed/cancelled) — el backend valida y devuelve 409 si no. */
+  attendDocument: (uuid: string, reason?: string, attendedBy?: string) =>
+    api
+      .post(`/superadmin/fiscal/documents/${uuid}/attend`, { reason, attended_by: attendedBy })
+      .then((r) => r.data),
+
+  unattendDocument: (uuid: string) =>
+    api.post(`/superadmin/fiscal/documents/${uuid}/unattend`).then((r) => r.data),
 
   bulkAction: (
     action: 'send' | 'retry' | 'force' | 'email' | 'poll',

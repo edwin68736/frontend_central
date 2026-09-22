@@ -37,6 +37,8 @@ import {
   sendModeLabel,
   emailStatusLabel,
   actionLabel,
+  isAttendable,
+  attendedBadge,
 } from '@/lib/fiscalStatus'
 
 const STORAGE_KEY = 'sa_fiscal_filters_v1'
@@ -63,6 +65,15 @@ const STATUS_OPTS = [
   { v: 'rejected', l: 'Rechazado' },
   { v: 'action', l: 'Requiere acción' },
   { v: 'cancelled', l: 'Anulado' },
+]
+
+// Filtro deliberadamente SEPARADO del status técnico de arriba: "atendido" es una decisión
+// administrativa (ver src/lib/fiscalStatus.ts), no un estado SUNAT/PSE — mezclarlo en el mismo
+// dropdown confundiría ambos conceptos, que es justo lo que se pidió evitar.
+const ATTENDED_OPTS = [
+  { v: '', l: 'Todos' },
+  { v: 'unattended', l: 'Solo no atendidos' },
+  { v: 'attended', l: 'Solo atendidos' },
 ]
 
 function KpiCard({
@@ -250,7 +261,7 @@ export default function FiscalDocumentsPage() {
       const skipped = res.skipped ?? 0
       toast.success(
         `Bulk ${action}: ${res.queued ?? 0} encolados` +
-          (skipped > 0 ? ` · ${skipped} omitidos por regla fiscal (accepted/business/permanent/manual_only)` : '')
+          (skipped > 0 ? ` · ${skipped} omitidos por regla fiscal (accepted/business/permanent/manual_only) o por estar atendidos` : '')
       )
       setSelected(new Set())
       reload()
@@ -274,6 +285,33 @@ export default function FiscalDocumentsPage() {
       reload()
     } catch (err) {
       toast.error(fiscalActionErrorMessage(err, 'Error en acción'))
+    }
+  }
+
+  const attendDocument = async (uuid: string) => {
+    const reason = window.prompt(
+      'Marcar como atendido: ya no se podrá reenviar/reintentar hasta quitarle "atendido". Motivo (opcional):',
+      ''
+    )
+    if (reason === null) return // canceló el prompt
+    try {
+      await fiscalService.attendDocument(uuid, reason.trim() || undefined)
+      toast.success('Documento marcado como atendido')
+      if (detail?.document.document_uuid === uuid) openDetail(uuid)
+      reload()
+    } catch (err) {
+      toast.error(fiscalActionErrorMessage(err, 'No se pudo marcar como atendido'))
+    }
+  }
+
+  const unattendDocument = async (uuid: string) => {
+    try {
+      await fiscalService.unattendDocument(uuid)
+      toast.success('Se quitó "atendido" del documento')
+      if (detail?.document.document_uuid === uuid) openDetail(uuid)
+      reload()
+    } catch (err) {
+      toast.error(fiscalActionErrorMessage(err, 'No se pudo quitar "atendido"'))
     }
   }
 
@@ -366,6 +404,24 @@ export default function FiscalDocumentsPage() {
             onChange={(e) => setFilters((f) => ({ ...f, group: e.target.value || undefined, status: undefined }))}
           >
             {STATUS_OPTS.map((o) => (
+              <option key={o.v} value={o.v}>
+                {o.l}
+              </option>
+            ))}
+          </select>
+          <select
+            className="border border-slate-200 rounded-lg px-3 py-2 text-sm"
+            value={filters.attended_only ? 'attended' : filters.unattended_only ? 'unattended' : ''}
+            onChange={(e) => {
+              const v = e.target.value
+              setFilters((f) => ({
+                ...f,
+                attended_only: v === 'attended' ? true : undefined,
+                unattended_only: v === 'unattended' ? true : undefined,
+              }))
+            }}
+          >
+            {ATTENDED_OPTS.map((o) => (
               <option key={o.v} value={o.v}>
                 {o.l}
               </option>
@@ -484,6 +540,7 @@ export default function FiscalDocumentsPage() {
                 <th className="p-3 text-left">Cliente</th>
                 <th className="p-3 text-left">Fecha</th>
                 <th className="p-3 text-left">Estado</th>
+                <th className="p-3 text-left">Atendido</th>
                 <th className="p-3 text-left">Proveedor</th>
                 <th className="p-3 text-right">Monto</th>
                 <th className="p-3 text-left">Email</th>
@@ -520,6 +577,12 @@ export default function FiscalDocumentsPage() {
                       return <Badge variant={g.variant}>{g.label}</Badge>
                     })()}
                   </td>
+                  <td className="p-3">
+                    {(() => {
+                      const b = attendedBadge(doc.attended)
+                      return <Badge variant={b.variant}>{b.label}</Badge>
+                    })()}
+                  </td>
                   <td className="p-3">{doc.provider || sendModeLabel(doc.send_mode)}</td>
                   <td className="p-3 text-right">{doc.total != null ? Number(doc.total).toFixed(2) : '—'}</td>
                   <td className="p-3">{emailStatusLabel(doc.email_status)}</td>
@@ -528,7 +591,7 @@ export default function FiscalDocumentsPage() {
               ))}
               {items.length === 0 && (
                 <tr>
-                  <td colSpan={12} className="p-8 text-center text-slate-400">
+                  <td colSpan={13} className="p-8 text-center text-slate-400">
                     Sin documentos con estos filtros
                   </td>
                 </tr>
@@ -566,33 +629,59 @@ export default function FiscalDocumentsPage() {
         {detail && !detailLoading && (
           <div className="space-y-4">
             <div className="flex flex-wrap gap-2">
-              {(['retry', 'send', 'force', 'poll', 'email'] as const)
-                .filter(
-                  (a) =>
-                    a === 'force' ||
-                    a === 'poll' ||
-                    a === 'email' ||
-                    !isNormalActionBlocked(detail.document.status, detail.document.error_type)
-                )
-                .map((a) => (
-                  <button
-                    key={a}
-                    type="button"
-                    onClick={() => runAction(detail.document.document_uuid, a, detail.document)}
-                    className={
-                      a === 'force'
-                        ? 'px-3 py-1.5 text-xs bg-amber-50 text-amber-800 rounded-lg hover:bg-amber-100 border border-amber-200'
-                        : 'px-3 py-1.5 text-xs bg-indigo-50 text-indigo-700 rounded-lg hover:bg-indigo-100'
-                    }
-                    title={a === 'force' ? 'Override administrativo: ignora las reglas normales de reenvío' : undefined}
-                  >
-                    {actionLabel(a)}
-                  </button>
-                ))}
-              {isNormalActionBlocked(detail.document.status, detail.document.error_type) && (
+              {detail.document.attended ? (
+                <span className="text-xs text-slate-600 bg-slate-100 rounded-lg px-3 py-1.5 self-center">
+                  Documento atendido — no admite reenvío/reintento. Quitar "atendido" para volver a habilitarlas.
+                </span>
+              ) : (
+                (['retry', 'send', 'force', 'poll', 'email'] as const)
+                  .filter(
+                    (a) =>
+                      a === 'force' ||
+                      a === 'poll' ||
+                      a === 'email' ||
+                      !isNormalActionBlocked(detail.document.status, detail.document.error_type)
+                  )
+                  .map((a) => (
+                    <button
+                      key={a}
+                      type="button"
+                      onClick={() => runAction(detail.document.document_uuid, a, detail.document)}
+                      className={
+                        a === 'force'
+                          ? 'px-3 py-1.5 text-xs bg-amber-50 text-amber-800 rounded-lg hover:bg-amber-100 border border-amber-200'
+                          : 'px-3 py-1.5 text-xs bg-indigo-50 text-indigo-700 rounded-lg hover:bg-indigo-100'
+                      }
+                      title={a === 'force' ? 'Override administrativo: ignora las reglas normales de reenvío' : undefined}
+                    >
+                      {actionLabel(a)}
+                    </button>
+                  ))
+              )}
+              {!detail.document.attended && isNormalActionBlocked(detail.document.status, detail.document.error_type) && (
                 <span className="text-xs text-slate-500 self-center">
                   send/retry normal no disponible en este estado — usar "force" para forzar de todas formas.
                 </span>
+              )}
+              {detail.document.attended ? (
+                <button
+                  type="button"
+                  onClick={() => unattendDocument(detail.document.document_uuid)}
+                  className="px-3 py-1.5 text-xs bg-slate-700 text-white rounded-lg hover:bg-slate-800"
+                >
+                  {actionLabel('unattend')}
+                </button>
+              ) : (
+                isAttendable(detail.document.status) && (
+                  <button
+                    type="button"
+                    onClick={() => attendDocument(detail.document.document_uuid)}
+                    className="px-3 py-1.5 text-xs bg-emerald-50 text-emerald-800 rounded-lg hover:bg-emerald-100 border border-emerald-200"
+                    title="Decisión administrativa: ya no se reenvía/reintenta este documento, sin importar el estado técnico"
+                  >
+                    {actionLabel('attend')}
+                  </button>
+                )
               )}
               {(['xml', 'signed_xml', 'cdr', 'pdf'] as const).map((t) => (
                 <button
@@ -626,6 +715,10 @@ export default function FiscalDocumentsPage() {
                   return <Badge variant={g.variant}>{g.label}</Badge>
                 })()}
                 {(() => {
+                  const b = attendedBadge(detail.document.attended)
+                  return <Badge variant={b.variant}>{b.label}</Badge>
+                })()}
+                {(() => {
                   const explanation = fiscalExplanation(
                     detail.document.status,
                     detail.document.error_type,
@@ -648,6 +741,14 @@ export default function FiscalDocumentsPage() {
                 <div className="col-span-2 text-xs text-slate-500">
                   <span className="text-slate-500">Próximo reintento automático:</span>{' '}
                   {new Date(detail.document.next_retry_at).toLocaleString()}
+                </div>
+              ) : null}
+              {detail.document.attended ? (
+                <div className="col-span-2 text-xs text-slate-500">
+                  <span className="text-slate-500">Atendido:</span>{' '}
+                  {detail.document.attended_at ? new Date(detail.document.attended_at).toLocaleString() : '—'}
+                  {detail.document.attended_by ? ` · por ${detail.document.attended_by}` : ''}
+                  {detail.document.attended_reason ? ` · "${detail.document.attended_reason}"` : ''}
                 </div>
               ) : null}
               <div className="col-span-2">

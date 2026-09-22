@@ -10,6 +10,9 @@ import {
   sendModeLabel,
   emailStatusLabel,
   queueTabLabel,
+  isAttendable,
+  attendedBadge,
+  actionLabel,
 } from './fiscalStatus'
 
 describe('fiscalGroup — Fase 3, semántica visual única (frontend NO reclasifica por texto)', () => {
@@ -190,5 +193,41 @@ describe('Traducciones de enums crudos del backend — /fiscal-operations y /fis
     expect(queueTabLabel('processing')).toBe('Procesando')
     expect(queueTabLabel('failed')).toBe('Con error')
     expect(queueTabLabel('retrying')).toBe('Reintentando')
+  })
+})
+
+describe('"Atendido" (2026-09-22) — decisión administrativa, independiente del status técnico SUNAT/PSE', () => {
+  it('isAttendable refleja exactamente ATTENDABLE_STATUSES de facturador_lycet (error/rejected/observed/cancelled)', () => {
+    expect(isAttendable('error')).toBe(true)
+    expect(isAttendable('rejected')).toBe(true)
+    expect(isAttendable('observed')).toBe(true)
+    expect(isAttendable('cancelled')).toBe(true)
+  })
+
+  it('isAttendable es false para todo status no terminal (el backend rechazaría con 409)', () => {
+    expect(isAttendable('pending')).toBe(false)
+    expect(isAttendable('queued')).toBe(false)
+    expect(isAttendable('sending')).toBe(false)
+    expect(isAttendable('sent')).toBe(false)
+    expect(isAttendable('accepted')).toBe(false)
+    expect(isAttendable('retrying')).toBe(false)
+  })
+
+  it('attendedBadge no reutiliza ninguna de las variantes/colores de fiscalGroup para no confundir ambos conceptos', () => {
+    const attended = attendedBadge(true)
+    const notAttended = attendedBadge(false)
+    expect(attended.label).toBe('Atendido')
+    expect(notAttended.label).toBe('No atendido')
+    expect(attended.variant).not.toBe(notAttended.variant)
+  })
+
+  it('attendedBadge trata null/undefined igual que false (documento nunca atendido, valor por defecto del backend)', () => {
+    expect(attendedBadge(null).label).toBe('No atendido')
+    expect(attendedBadge(undefined).label).toBe('No atendido')
+  })
+
+  it('actionLabel traduce attend/unattend', () => {
+    expect(actionLabel('attend')).toBe('Marcar atendido')
+    expect(actionLabel('unattend')).toBe('Quitar atendido')
   })
 })

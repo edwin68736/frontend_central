@@ -23,6 +23,8 @@ const mocks = vi.hoisted(() => ({
   getDocument: vi.fn(),
   documentAction: vi.fn(),
   bulkAction: vi.fn(),
+  attendDocument: vi.fn(),
+  unattendDocument: vi.fn(),
 }))
 
 vi.mock('@/services/fiscal.service', async () => {
@@ -117,6 +119,8 @@ describe('FiscalDocumentsPage — Fase 3', () => {
     mocks.getDocument.mockReset()
     mocks.documentAction.mockReset()
     mocks.bulkAction.mockReset()
+    mocks.attendDocument.mockReset()
+    mocks.unattendDocument.mockReset()
     vi.spyOn(window, 'confirm').mockReturnValue(true)
   })
 
@@ -202,5 +206,114 @@ describe('FiscalDocumentsPage — Fase 3', () => {
     render(<FiscalDocumentsPage />)
     await waitFor(() => expect(screen.getByText('tenant-business')).toBeInTheDocument())
     expect(screen.getByText(/rechazado \(negocio\)/i)).toBeInTheDocument()
+  })
+})
+
+describe('"Atendido" (2026-09-22) — independiente del status técnico, nunca se mezcla con fiscalGroup', () => {
+  beforeEach(() => {
+    mocks.getStats.mockReset().mockResolvedValue(emptyStats)
+    mocks.listDocuments.mockReset()
+    mocks.getDocument.mockReset()
+    mocks.documentAction.mockReset()
+    mocks.bulkAction.mockReset()
+    mocks.attendDocument.mockReset()
+    mocks.unattendDocument.mockReset()
+  })
+
+  const businessDoc = {
+    ...acceptedDoc,
+    document_uuid: 'uuid-business-2',
+    tenant_slug: 'tenant-business-2',
+    status: 'rejected',
+    error_type: 'business',
+    retryable: false,
+  }
+
+  it('un documento no atendido en status terminal muestra "Marcar atendido" y ninguna acción bloqueada por "atendido"', async () => {
+    mocks.listDocuments.mockResolvedValue({ items: [businessDoc], counts: {}, has_more: false, next_cursor: null })
+    mocks.getDocument.mockResolvedValue(detailFor(businessDoc))
+
+    render(<FiscalDocumentsPage />)
+    await openDetailFor('tenant-business-2')
+
+    expect(screen.getByRole('button', { name: 'Marcar atendido' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Quitar atendido' })).not.toBeInTheDocument()
+    expect(screen.getAllByText('No atendido').length).toBeGreaterThan(0)
+  })
+
+  it('marcar atendido pide un motivo opcional, llama a attendDocument y refresca el detalle', async () => {
+    mocks.listDocuments.mockResolvedValue({ items: [businessDoc], counts: {}, has_more: false, next_cursor: null })
+    mocks.getDocument.mockResolvedValue(detailFor(businessDoc))
+    mocks.attendDocument.mockResolvedValue({ ok: true, attended: true })
+    vi.spyOn(window, 'prompt').mockReturnValue('cliente resolvió por WhatsApp')
+
+    render(<FiscalDocumentsPage />)
+    const user = await openDetailFor('tenant-business-2')
+    await user.click(screen.getByRole('button', { name: 'Marcar atendido' }))
+
+    await waitFor(() =>
+      expect(mocks.attendDocument).toHaveBeenCalledWith('uuid-business-2', 'cliente resolvió por WhatsApp')
+    )
+    expect(mocks.getDocument).toHaveBeenCalledTimes(2) // apertura inicial + refresh tras marcar
+  })
+
+  it('cancelar el prompt de motivo no llama a attendDocument', async () => {
+    mocks.listDocuments.mockResolvedValue({ items: [businessDoc], counts: {}, has_more: false, next_cursor: null })
+    mocks.getDocument.mockResolvedValue(detailFor(businessDoc))
+    vi.spyOn(window, 'prompt').mockReturnValue(null)
+
+    render(<FiscalDocumentsPage />)
+    const user = await openDetailFor('tenant-business-2')
+    await user.click(screen.getByRole('button', { name: 'Marcar atendido' }))
+
+    expect(mocks.attendDocument).not.toHaveBeenCalled()
+  })
+
+  it('un documento atendido oculta send/retry/force/poll/email y solo ofrece "Quitar atendido"', async () => {
+    const attendedDoc = {
+      ...businessDoc,
+      attended: true,
+      attended_reason: 'cliente resolvió por WhatsApp',
+      attended_by: 'admin@tukifac.com',
+      attended_at: '2026-09-22T13:00:00+00:00',
+    }
+    mocks.listDocuments.mockResolvedValue({ items: [attendedDoc], counts: {}, has_more: false, next_cursor: null })
+    mocks.getDocument.mockResolvedValue(detailFor(attendedDoc))
+
+    render(<FiscalDocumentsPage />)
+    await openDetailFor('tenant-business-2')
+
+    expect(screen.queryByRole('button', { name: 'Forzar' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Correo' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Marcar atendido' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Quitar atendido' })).toBeInTheDocument()
+    expect(screen.getByText(/no admite reenvío\/reintento/i)).toBeInTheDocument()
+    // Aparece tanto en la fila de la tabla como en el badge del modal de detalle.
+    expect(screen.getAllByText('Atendido').length).toBeGreaterThan(0)
+    expect(screen.getByText(/cliente resolvió por WhatsApp/)).toBeInTheDocument()
+    expect(screen.getByText(/admin@tukifac.com/)).toBeInTheDocument()
+  })
+
+  it('quitar atendido llama a unattendDocument y refresca', async () => {
+    const attendedDoc = { ...businessDoc, attended: true }
+    mocks.listDocuments.mockResolvedValue({ items: [attendedDoc], counts: {}, has_more: false, next_cursor: null })
+    mocks.getDocument.mockResolvedValue(detailFor(attendedDoc))
+    mocks.unattendDocument.mockResolvedValue({ ok: true, attended: false })
+
+    render(<FiscalDocumentsPage />)
+    const user = await openDetailFor('tenant-business-2')
+    await user.click(screen.getByRole('button', { name: 'Quitar atendido' }))
+
+    await waitFor(() => expect(mocks.unattendDocument).toHaveBeenCalledWith('uuid-business-2'))
+  })
+
+  it('un documento no atendido en status no-terminal (accepted) no ofrece "Marcar atendido"', async () => {
+    mocks.listDocuments.mockResolvedValue({ items: [acceptedDoc], counts: {}, has_more: false, next_cursor: null })
+    mocks.getDocument.mockResolvedValue(detailFor(acceptedDoc))
+
+    render(<FiscalDocumentsPage />)
+    await openDetailFor('tenant-accepted')
+
+    expect(screen.queryByRole('button', { name: 'Marcar atendido' })).not.toBeInTheDocument()
   })
 })
