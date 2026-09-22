@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import FiscalDocumentsPage from './FiscalDocumentsPage'
 
@@ -241,15 +241,22 @@ describe('"Atendido" (2026-09-22) — independiente del status técnico, nunca s
     expect(screen.getAllByText('No atendido').length).toBeGreaterThan(0)
   })
 
-  it('marcar atendido pide un motivo opcional, llama a attendDocument y refresca el detalle', async () => {
+  it('marcar atendido abre un modal propio (no window.prompt), pide un motivo opcional, llama a attendDocument y refresca el detalle', async () => {
     mocks.listDocuments.mockResolvedValue({ items: [businessDoc], counts: {}, has_more: false, next_cursor: null })
     mocks.getDocument.mockResolvedValue(detailFor(businessDoc))
     mocks.attendDocument.mockResolvedValue({ ok: true, attended: true })
-    vi.spyOn(window, 'prompt').mockReturnValue('cliente resolvió por WhatsApp')
+    const promptSpy = vi.spyOn(window, 'prompt')
 
     render(<FiscalDocumentsPage />)
     const user = await openDetailFor('tenant-business-2')
     await user.click(screen.getByRole('button', { name: 'Marcar atendido' }))
+
+    expect(screen.getByText('Marcar como atendido')).toBeInTheDocument()
+    expect(promptSpy).not.toHaveBeenCalled()
+
+    await user.type(screen.getByPlaceholderText(/cliente resolvió por otra vía/i), 'cliente resolvió por WhatsApp')
+    const submitButtons = screen.getAllByRole('button', { name: 'Marcar atendido' })
+    await user.click(submitButtons[submitButtons.length - 1])
 
     await waitFor(() =>
       expect(mocks.attendDocument).toHaveBeenCalledWith('uuid-business-2', 'cliente resolvió por WhatsApp')
@@ -257,16 +264,17 @@ describe('"Atendido" (2026-09-22) — independiente del status técnico, nunca s
     expect(mocks.getDocument).toHaveBeenCalledTimes(2) // apertura inicial + refresh tras marcar
   })
 
-  it('cancelar el prompt de motivo no llama a attendDocument', async () => {
+  it('cancelar el modal de motivo no llama a attendDocument', async () => {
     mocks.listDocuments.mockResolvedValue({ items: [businessDoc], counts: {}, has_more: false, next_cursor: null })
     mocks.getDocument.mockResolvedValue(detailFor(businessDoc))
-    vi.spyOn(window, 'prompt').mockReturnValue(null)
 
     render(<FiscalDocumentsPage />)
     const user = await openDetailFor('tenant-business-2')
     await user.click(screen.getByRole('button', { name: 'Marcar atendido' }))
+    await user.click(screen.getByRole('button', { name: 'Cancelar' }))
 
     expect(mocks.attendDocument).not.toHaveBeenCalled()
+    expect(screen.queryByText('Marcar como atendido')).not.toBeInTheDocument()
   })
 
   it('un documento atendido oculta send/retry/force/poll/email y solo ofrece "Quitar atendido"', async () => {
@@ -292,6 +300,49 @@ describe('"Atendido" (2026-09-22) — independiente del status técnico, nunca s
     expect(screen.getAllByText('Atendido').length).toBeGreaterThan(0)
     expect(screen.getByText(/cliente resolvió por WhatsApp/)).toBeInTheDocument()
     expect(screen.getByText(/admin@tukifac.com/)).toBeInTheDocument()
+  })
+
+  it('el checkbox de una fila atendida está deshabilitado, el de una no atendida no', async () => {
+    const attendedDoc = { ...businessDoc, attended: true }
+    const notAttendedDoc = { ...acceptedDoc, document_uuid: 'uuid-not-attended-select', tenant_slug: 'tenant-select' }
+    mocks.listDocuments.mockResolvedValue({
+      items: [attendedDoc, notAttendedDoc],
+      counts: {},
+      has_more: false,
+      next_cursor: null,
+    })
+
+    render(<FiscalDocumentsPage />)
+    await waitFor(() => expect(screen.getByText('tenant-business-2')).toBeInTheDocument())
+
+    const table = screen.getByRole('table')
+    const checkboxes = within(table).getAllByRole('checkbox') as HTMLInputElement[]
+    // checkboxes[0] = "seleccionar todos" del encabezado; [1] = fila atendida; [2] = fila no atendida.
+    expect(checkboxes[1]).toBeDisabled()
+    expect(checkboxes[2]).not.toBeDisabled()
+  })
+
+  it('"seleccionar todos" solo marca los documentos no atendidos', async () => {
+    const attendedDoc = { ...businessDoc, attended: true }
+    const notAttendedDoc = { ...acceptedDoc, document_uuid: 'uuid-not-attended-select-all', tenant_slug: 'tenant-select-all' }
+    mocks.listDocuments.mockResolvedValue({
+      items: [attendedDoc, notAttendedDoc],
+      counts: {},
+      has_more: false,
+      next_cursor: null,
+    })
+
+    const user = userEvent.setup()
+    render(<FiscalDocumentsPage />)
+    await waitFor(() => expect(screen.getByText('tenant-business-2')).toBeInTheDocument())
+
+    const table = screen.getByRole('table')
+    const checkboxes = within(table).getAllByRole('checkbox') as HTMLInputElement[]
+    await user.click(checkboxes[0])
+
+    expect(screen.getByText(/1 seleccionados/)).toBeInTheDocument()
+    expect(checkboxes[1]).not.toBeChecked() // la fila atendida nunca se marca
+    expect(checkboxes[2]).toBeChecked()
   })
 
   it('quitar atendido llama a unattendDocument y refresca', async () => {

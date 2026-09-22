@@ -130,6 +130,9 @@ export default function FiscalDocumentsPage() {
   const [detailOpen, setDetailOpen] = useState(false)
   const [detailLoading, setDetailLoading] = useState(false)
   const [bulkLoading, setBulkLoading] = useState(false)
+  const [attendTarget, setAttendTarget] = useState<string | null>(null)
+  const [attendReason, setAttendReason] = useState('')
+  const [attendSubmitting, setAttendSubmitting] = useState(false)
 
   const filterQuery = useMemo(() => {
     const { cursor: _c, offset: _o, ...rest } = filters
@@ -240,9 +243,13 @@ export default function FiscalDocumentsPage() {
     })
   }
 
+  // Un documento atendido no admite ninguna acción (ver fiscalStatus.ts) — no tiene sentido
+  // dejarlo seleccionable para lote, ya que el backend lo omitiría en silencio de todas formas.
+  const selectableItems = useMemo(() => items.filter((i) => !i.attended), [items])
+
   const toggleAll = () => {
-    if (selected.size === items.length) setSelected(new Set())
-    else setSelected(new Set(items.map((i) => i.document_uuid)))
+    if (selected.size === selectableItems.length && selectableItems.length > 0) setSelected(new Set())
+    else setSelected(new Set(selectableItems.map((i) => i.document_uuid)))
   }
 
   const runBulk = async (action: 'send' | 'retry' | 'force' | 'email' | 'poll') => {
@@ -288,19 +295,25 @@ export default function FiscalDocumentsPage() {
     }
   }
 
-  const attendDocument = async (uuid: string) => {
-    const reason = window.prompt(
-      'Marcar como atendido: ya no se podrá reenviar/reintentar hasta quitarle "atendido". Motivo (opcional):',
-      ''
-    )
-    if (reason === null) return // canceló el prompt
+  const openAttendModal = (uuid: string) => {
+    setAttendReason('')
+    setAttendTarget(uuid)
+  }
+
+  const confirmAttend = async () => {
+    if (!attendTarget) return
+    const uuid = attendTarget
+    setAttendSubmitting(true)
     try {
-      await fiscalService.attendDocument(uuid, reason.trim() || undefined)
+      await fiscalService.attendDocument(uuid, attendReason.trim() || undefined)
       toast.success('Documento marcado como atendido')
+      setAttendTarget(null)
       if (detail?.document.document_uuid === uuid) openDetail(uuid)
       reload()
     } catch (err) {
       toast.error(fiscalActionErrorMessage(err, 'No se pudo marcar como atendido'))
+    } finally {
+      setAttendSubmitting(false)
     }
   }
 
@@ -529,8 +542,10 @@ export default function FiscalDocumentsPage() {
                 <th className="p-3 w-8">
                   <input
                     type="checkbox"
-                    checked={selected.size === items.length && items.length > 0}
+                    checked={selected.size === selectableItems.length && selectableItems.length > 0}
+                    disabled={selectableItems.length === 0}
                     onChange={toggleAll}
+                    title={selectableItems.length === 0 ? 'Ningún documento de esta página admite selección (todos atendidos)' : undefined}
                   />
                 </th>
                 <th className="p-3 text-left">Tenant</th>
@@ -558,7 +573,9 @@ export default function FiscalDocumentsPage() {
                     <input
                       type="checkbox"
                       checked={selected.has(doc.document_uuid)}
+                      disabled={doc.attended}
                       onChange={() => toggleSelect(doc.document_uuid)}
+                      title={doc.attended ? 'Documento atendido — no admite acciones' : undefined}
                     />
                   </td>
                   <td className="p-3 font-medium">{doc.tenant_slug}</td>
@@ -675,7 +692,7 @@ export default function FiscalDocumentsPage() {
                 isAttendable(detail.document.status) && (
                   <button
                     type="button"
-                    onClick={() => attendDocument(detail.document.document_uuid)}
+                    onClick={() => openAttendModal(detail.document.document_uuid)}
                     className="px-3 py-1.5 text-xs bg-emerald-50 text-emerald-800 rounded-lg hover:bg-emerald-100 border border-emerald-200"
                     title="Decisión administrativa: ya no se reenvía/reintenta este documento, sin importar el estado técnico"
                   >
@@ -797,6 +814,40 @@ export default function FiscalDocumentsPage() {
             </details>
           </div>
         )}
+      </Modal>
+
+      <Modal open={attendTarget !== null} onClose={() => setAttendTarget(null)} title="Marcar como atendido" maxWidth="max-w-md">
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600">
+            Ya no se podrá reenviar/reintentar/forzar este documento hasta quitarle "atendido". Motivo (opcional):
+          </p>
+          <textarea
+            autoFocus
+            rows={3}
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm resize-none"
+            placeholder="Ej: cliente resolvió por otra vía, ya no se factura"
+            value={attendReason}
+            onChange={(e) => setAttendReason(e.target.value)}
+          />
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setAttendTarget(null)}
+              disabled={attendSubmitting}
+              className="px-4 py-2 text-sm border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={confirmAttend}
+              disabled={attendSubmitting}
+              className="px-4 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50"
+            >
+              {attendSubmitting ? 'Marcando…' : 'Marcar atendido'}
+            </button>
+          </div>
+        </div>
       </Modal>
     </div>
   )
