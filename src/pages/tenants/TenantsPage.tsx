@@ -967,8 +967,11 @@ export default function TenantsPage() {
       const mode = sunatForm.send_mode ?? 'sunat_direct'
       if (mode === 'pse') {
         const tokenConfigured = !!sunatTenant.config.pse_token_configured
-        if (!sunatForm.pse_user?.trim() && !tokenConfigured) {
-          toast.error('Ingrese el usuario PSE (ValidaPSE)')
+        const provider = sunatForm.fiscal_provider ?? sunatForm.pse_provider ?? 'validapse'
+        // "Nuestro PSE" (pse.tukifac.com) autentica solo con el token — no usa un campo de
+        // usuario separado (a diferencia de ValidaPSE), así que no lo exigimos acá.
+        if (provider !== 'pseapp' && !sunatForm.pse_user?.trim() && !tokenConfigured) {
+          toast.error('Ingrese el usuario PSE')
           setSavingSunat(false)
           return
         }
@@ -2162,16 +2165,19 @@ export default function TenantsPage() {
                       className={inputClass}
                     >
                       <option value="validapse">ValidaPSE</option>
+                      <option value="pseapp">Nuestro PSE</option>
                     </select>
                   </FormField>
-                  <FormField label="Usuario PSE">
-                    <input
-                      value={sunatForm.pse_user ?? ''}
-                      onChange={(e) => setSunatForm((f) => ({ ...f, pse_user: e.target.value }))}
-                      placeholder="Usuario de credenciales ValidaPSE"
-                      className={inputClass}
-                    />
-                  </FormField>
+                  {(sunatForm.fiscal_provider ?? sunatForm.pse_provider ?? 'validapse') !== 'pseapp' ? (
+                    <FormField label="Usuario PSE">
+                      <input
+                        value={sunatForm.pse_user ?? ''}
+                        onChange={(e) => setSunatForm((f) => ({ ...f, pse_user: e.target.value }))}
+                        placeholder="Usuario de credenciales ValidaPSE"
+                        className={inputClass}
+                      />
+                    </FormField>
+                  ) : null}
                   <FormField label="Contraseña / Token de acceso">
                     <input
                       type="password"
@@ -2180,20 +2186,32 @@ export default function TenantsPage() {
                       placeholder={
                         sunatTenant.config.pse_token_configured
                           ? 'Configurado en facturador (vacío = no cambiar)'
-                          : 'Token de acceso de ValidaPSE'
+                          : 'Token de acceso (credencial CPE del PSE)'
                       }
                       className={inputClass}
                     />
                   </FormField>
-                  <div className="col-span-full bg-slate-50 border border-slate-100 rounded-lg px-3 py-2 text-xs text-slate-600 space-y-1">
-                    <p>
-                      ValidaPSE autentica con <span className="font-mono">Authorization: Bearer TOKEN</span>.
-                      La contraseña del panel es el token de acceso; el usuario se guarda para referencia.
-                    </p>
-                    <p>
-                      La URL del API (<span className="font-mono">app.validapse.com</span>) se configura automáticamente.
-                    </p>
-                  </div>
+                  {(sunatForm.fiscal_provider ?? sunatForm.pse_provider ?? 'validapse') === 'pseapp' ? (
+                    <div className="col-span-full bg-slate-50 border border-slate-100 rounded-lg px-3 py-2 text-xs text-slate-600 space-y-1">
+                      <p>
+                        Nuestro PSE autentica solo con <span className="font-mono">Authorization: Bearer TOKEN</span> — no
+                        usa un usuario separado. El token es la credencial CPE que el PSE genera por cada RUC/emisor.
+                      </p>
+                      <p>
+                        La URL del API (<span className="font-mono">pse.tukifac.com</span>) se configura automáticamente.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="col-span-full bg-slate-50 border border-slate-100 rounded-lg px-3 py-2 text-xs text-slate-600 space-y-1">
+                      <p>
+                        ValidaPSE autentica con <span className="font-mono">Authorization: Bearer TOKEN</span>.
+                        La contraseña del panel es el token de acceso; el usuario se guarda para referencia.
+                      </p>
+                      <p>
+                        La URL del API (<span className="font-mono">app.validapse.com</span>) se configura automáticamente.
+                      </p>
+                    </div>
+                  )}
                 </>
               ) : null}
             </div>
