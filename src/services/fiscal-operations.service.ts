@@ -125,6 +125,15 @@ const qs = (params: Record<string, string | number | boolean | undefined>) => {
   return p.toString()
 }
 
+export interface TenantResendResult {
+  found: number
+  queued: number
+  already_accepted: number
+  in_progress: number
+  failed: number
+  remaining: number
+}
+
 /** Resumen fiscal por tenant que vive en la BD central (se refresca cada ~15 min desde las BD de los tenants). */
 export interface TenantFiscalSummaryRow {
   tenant_id: number
@@ -147,6 +156,8 @@ export interface TenantFiscalSummaryRow {
   last_issue_at: string | null
   scanned_at: string | null
   scan_error?: string
+  /** Su pendiente más antiguo lleva 3 días o más sin enviarse. */
+  stale: boolean
 }
 
 export interface TenantFiscalSummaryTotals {
@@ -159,6 +170,8 @@ export interface TenantFiscalSummaryTotals {
   rejected: number
   to_send: number
   with_to_send: number
+  /** Tenants con un pendiente de 3 días o más. */
+  stale: number
   scan_errors: number
 }
 
@@ -179,6 +192,7 @@ export interface TenantFiscalSummaryParams {
   ruc?: string
   q?: string
   only_pending?: boolean
+  stale_only?: boolean
   sort?: 'to_send' | 'emitted' | 'accepted' | 'name' | 'oldest' | 'scanned'
   page?: number
   per_page?: number
@@ -199,6 +213,10 @@ export const fiscalOperationsService = {
   /** "Verificar ahora": reescanea un tenant sin esperar al job periódico. */
   refreshTenantSummary: (tenantId: number) =>
     api.post<{ ok: boolean }>(`/superadmin/fiscal/tenant-summary/${tenantId}/refresh`).then((r) => r.data),
+
+  /** Reenvía a SUNAT los pendientes/con error del tenant (hasta 100, los más antiguos primero). Requiere fiscal.retry. */
+  resendTenantPending: (tenantId: number) =>
+    api.post<TenantResendResult>(`/superadmin/fiscal/tenant-summary/${tenantId}/resend-pending`).then((r) => r.data),
 
   getHealth: () => api.get<FiscalHealth>('/superadmin/fiscal/health').then((r) => r.data),
 

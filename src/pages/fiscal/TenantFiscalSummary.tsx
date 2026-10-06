@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { RefreshCw, Search, FileSpreadsheet, ChevronDown, ChevronRight, ExternalLink, AlertTriangle } from 'lucide-react'
+import { RefreshCw, Send, Search, FileSpreadsheet, ChevronDown, ChevronRight, ExternalLink, AlertTriangle } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   fiscalOperationsService,
@@ -8,6 +8,7 @@ import {
   TenantFiscalSummaryRow,
 } from '@/services/fiscal-operations.service'
 import { Card, CardBody, CardHeader } from '@/components/ui/Card'
+import Modal from '@/components/ui/Modal'
 import Badge from '@/components/ui/Badge'
 import { DATE_PRESETS, DatePreset, rangeForPreset, formatLima, limaDate } from '@/lib/fiscalFilters'
 
@@ -72,6 +73,9 @@ export default function TenantFiscalSummary() {
   const [rucApplied, setRucApplied] = useState('')
   const [qApplied, setQApplied] = useState('')
   const [onlyPending, setOnlyPending] = useState(false)
+  const [staleOnly, setStaleOnly] = useState(false)
+  const [resendTarget, setResendTarget] = useState<TenantFiscalSummaryRow | null>(null)
+  const [resending, setResending] = useState(false)
   const [sort, setSort] = useState<NonNullable<TenantFiscalSummaryParams['sort']>>('to_send')
   const [page, setPage] = useState(1)
   const [perPage, setPerPage] = useState(25)
@@ -99,11 +103,12 @@ export default function TenantFiscalSummary() {
       ruc: rucApplied || undefined,
       q: qApplied || undefined,
       only_pending: onlyPending,
+      stale_only: staleOnly,
       sort,
       page,
       per_page: perPage,
     }),
-    [preset, from, to, docTypes, rucApplied, qApplied, onlyPending, sort, page, perPage]
+    [preset, from, to, docTypes, rucApplied, qApplied, onlyPending, staleOnly, sort, page, perPage]
   )
 
   const load = useCallback(async () => {
@@ -154,6 +159,31 @@ export default function TenantFiscalSummary() {
       toast.error(msg || 'No se pudo verificar el tenant')
     } finally {
       setRefreshing(null)
+    }
+  }
+
+  const confirmResend = async () => {
+    if (!resendTarget) return
+    setResending(true)
+    try {
+      const r = await fiscalOperationsService.resendTenantPending(resendTarget.tenant_id)
+      if (r.found === 0) {
+        toast.success('No hay pendientes con más de 10 min para reenviar')
+      } else {
+        const parts = [`${r.queued} reenviados`]
+        if (r.already_accepted > 0) parts.push(`${r.already_accepted} ya aceptados (sincronizados)`)
+        if (r.in_progress > 0) parts.push(`${r.in_progress} ya en proceso`)
+        if (r.failed > 0) parts.push(`${r.failed} con error`)
+        if (r.remaining > 0) parts.push(`${r.remaining} quedan para otra pasada`)
+        toast.success(`${resendTarget.name}: ${parts.join(' · ')}`)
+      }
+      setResendTarget(null)
+      await load()
+    } catch (err) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error
+      toast.error(msg || 'No se pudo reenviar los pendientes')
+    } finally {
+      setResending(false)
     }
   }
 
@@ -317,6 +347,17 @@ export default function TenantFiscalSummary() {
             />
             Solo con pendientes por enviar
           </label>
+          <label className="text-xs flex items-center gap-1.5 text-slate-600" title="Tenants con un comprobante sin enviar desde hace 3 días o más">
+            <input
+              type="checkbox"
+              checked={staleOnly}
+              onChange={(e) => {
+                setStaleOnly(e.target.checked)
+                setPage(1)
+              }}
+            />
+            Solo atrasados (3+ días)
+          </label>
           <select
             value={sort}
             onChange={(e) => {
@@ -335,13 +376,14 @@ export default function TenantFiscalSummary() {
         </div>
 
         {totals && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2">
             <Stat label="Emitidos" value={totals.emitted} />
             <Stat label="Aceptados" value={totals.accepted} tone="text-emerald-700" />
             <Stat label="Faltan enviar" value={totals.to_send} tone={totals.to_send > 0 ? 'text-red-600' : undefined} />
             <Stat label="En envío" value={totals.sent} tone="text-amber-600" />
             <Stat label="Rechazados" value={totals.rejected} />
             <Stat label="Tenants con pendientes" value={totals.with_to_send} />
+            <Stat label="Con pendientes de 3+ días" value={totals.stale} tone={totals.stale > 0 ? 'text-red-600' : undefined} />
           </div>
         )}
         {totals && totals.scan_errors > 0 && (
@@ -392,7 +434,7 @@ export default function TenantFiscalSummary() {
                     <td className="px-3 py-2 text-right tabular-nums">{r.rejected || <span className="text-slate-300">0</span>}</td>
                     <td className="px-3 py-2 text-xs">
                       {r.oldest_open_at ? (
-                        <span className={age !== null && age >= 3 ? 'text-red-600 font-medium' : 'text-slate-600'}>
+                        <span className={r.stale ? 'text-red-600 font-medium' : 'text-slate-600'}>
                           {r.oldest_open_at.slice(0, 10)}
                           {age !== null && ` (${age} d)`}
                         </span>
@@ -419,6 +461,16 @@ export default function TenantFiscalSummary() {
                         >
                           <ExternalLink size={12} /> Documentos
                         </a>
+                        {r.open_to_send > 0 && r.tenant_status === 'active' && (
+                          <button
+                            type="button"
+                            onClick={() => setResendTarget(r)}
+                            className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-amber-50 text-amber-800 border border-amber-200 rounded hover:bg-amber-100"
+                            title="Reenviar a SUNAT los comprobantes pendientes o con error de este tenant"
+                          >
+                            <Send size={12} /> Reenviar
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => verifyNow(r)}
@@ -513,6 +565,28 @@ export default function TenantFiscalSummary() {
           </button>
         </div>
       </div>
+      <Modal open={resendTarget !== null} onClose={() => !resending && setResendTarget(null)} title="Reenviar pendientes a SUNAT" maxWidth="max-w-md">
+        {resendTarget && (
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600">
+              <b>{resendTarget.name}</b> tiene <b>{resendTarget.open_to_send.toLocaleString()}</b> comprobante(s) sin enviar o con error de envío.
+              Se reenviarán los más antiguos primero, hasta <b>100</b> por vez, solo los creados hace más de 10 minutos.
+            </p>
+            <p className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-3">
+              Antes de reenviar cada uno se consulta al facturador: si SUNAT ya lo aceptó solo se actualiza su estado, sin duplicarlo. Los
+              rechazados por SUNAT y las notas de venta no se reenvían. Queda registrado en la auditoría.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => setResendTarget(null)} disabled={resending} className="px-4 py-2 text-sm border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">
+                Cancelar
+              </button>
+              <button type="button" onClick={confirmResend} disabled={resending} className="px-4 py-2 text-sm bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-50">
+                {resending ? 'Reenviando…' : 'Reenviar'}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </Card>
   )
 }
