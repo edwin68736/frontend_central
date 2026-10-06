@@ -67,6 +67,23 @@ export function formatLima(iso?: string | null): string {
   }).format(d)
 }
 
+/** "hace 12 min" / "hace 3 h" / "hace 2 d" a partir de una fecha ISO. */
+export function agoText(iso: string | null | undefined, now: number = Date.now()): string {
+  if (!iso) return 'nunca'
+  const ms = now - new Date(iso).getTime()
+  if (Number.isNaN(ms)) return '—'
+  return `hace ${durationText(Math.max(0, ms / 1000))}`.replace('hace menos de 1 min', 'hace instantes')
+}
+
+/** Duración corta: "menos de 1 min", "12 min", "3 h", "2 d". */
+export function durationText(seconds: number): string {
+  const min = Math.round(seconds / 60)
+  if (min < 1) return 'menos de 1 min'
+  if (min < 60) return `${min} min`
+  if (min < 60 * 48) return `${Math.round(min / 60)} h`
+  return `${Math.round(min / 1440)} d`
+}
+
 export const DOC_TYPE_LABELS: Record<string, string> = {
   '01': 'Factura',
   '03': 'Boleta',

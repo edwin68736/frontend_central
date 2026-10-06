@@ -224,8 +224,9 @@ export function emailStatusLabel(status: string | null | undefined): string {
 const QUEUE_TAB_LABELS: Record<string, string> = {
   queued: 'En cola',
   processing: 'Procesando',
-  failed: 'Con error',
   retrying: 'Reintentando',
+  stuck: 'Atascados',
+  failed: 'Con error',
 }
 
 export function queueTabLabel(tab: string): string {

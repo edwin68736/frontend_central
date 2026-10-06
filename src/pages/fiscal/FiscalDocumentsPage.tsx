@@ -240,8 +240,12 @@ export default function FiscalDocumentsPage() {
     return tenant ? { tenant_slug: tenant } : loadSavedFilters()
   })
   const [searchText, setSearchText] = useState('')
-  const [tab, setTab] = useState<Tab>('pending')
-  const [pendingSub, setPendingSub] = useState<FiscalView>('pending')
+  // Un enlace desde Operaciones puede abrir una vista concreta: ?view=needs_action | processing | history.
+  const initialView = new URLSearchParams(window.location.search).get('view')
+  const [tab, setTab] = useState<Tab>(initialView === 'history' ? 'history' : 'pending')
+  const [pendingSub, setPendingSub] = useState<FiscalView>(
+    initialView === 'needs_action' || initialView === 'processing' ? initialView : 'pending'
+  )
   const [historySub, setHistorySub] = useState<FiscalView>('history')
   const [pageSize, setPageSize] = useState(50)
   const [showAdvanced, setShowAdvanced] = useState(false)

@@ -10,7 +10,7 @@ import {
 import { Card, CardBody, CardHeader } from '@/components/ui/Card'
 import Modal from '@/components/ui/Modal'
 import Badge from '@/components/ui/Badge'
-import { DATE_PRESETS, DatePreset, rangeForPreset, formatLima, limaDate } from '@/lib/fiscalFilters'
+import { DATE_PRESETS, DatePreset, agoText, rangeForPreset, formatLima, limaDate } from '@/lib/fiscalFilters'
 
 const PAGE_SIZES = [25, 50, 100]
 
@@ -33,18 +33,6 @@ const SORTS: { v: NonNullable<TenantFiscalSummaryParams['sort']>; l: string }[] 
   { v: 'scanned', l: 'Verificado hace más tiempo' },
   { v: 'name', l: 'Nombre (A-Z)' },
 ]
-
-/** "hace 12 min" / "hace 3 h" / "hace 2 d" a partir de una fecha ISO. */
-function ago(iso: string | null | undefined, now = Date.now()): string {
-  if (!iso) return 'nunca'
-  const ms = now - new Date(iso).getTime()
-  if (Number.isNaN(ms)) return '—'
-  const min = Math.max(0, Math.round(ms / 60000))
-  if (min < 1) return 'hace instantes'
-  if (min < 60) return `hace ${min} min`
-  if (min < 60 * 48) return `hace ${Math.round(min / 60)} h`
-  return `hace ${Math.round(min / 1440)} d`
-}
 
 /** Antigüedad del pendiente más antiguo (la fecha viene como día, medianoche UTC). */
 function ageDays(iso: string | null | undefined): number | null {
@@ -230,7 +218,7 @@ export default function TenantFiscalSummary() {
           <span className="font-semibold">Comprobantes por tenant</span>
           <p className="text-xs text-slate-500">
             Emitidos desde el ERP de cada tenant vs. lo que falta enviar a SUNAT. Se actualiza cada ~15 min
-            {data?.oldest_scan ? ` · verificación más antigua: ${ago(data.oldest_scan)}` : ''}.
+            {data?.oldest_scan ? ` · verificación más antigua: ${agoText(data.oldest_scan)}` : ''}.
           </p>
         </div>
         <button
@@ -449,7 +437,7 @@ export default function TenantFiscalSummary() {
                           Error de escaneo
                         </span>
                       ) : (
-                        <span className="text-slate-500">{ago(r.scanned_at)}</span>
+                        <span className="text-slate-500">{agoText(r.scanned_at)}</span>
                       )}
                     </td>
                     <td className="px-3 py-2 whitespace-nowrap">

@@ -28,6 +28,10 @@ export interface FiscalOperationsSummary {
     tenants_connected: number
     tenants_with_error: number
     open_alerts: number
+    /** En cola/enviando/reintentando sin avanzar hace demasiado. */
+    stuck?: number
+    /** Con error, rechazados o anulados sin atender: se gestionan en Documentos fiscales. */
+    needs_action?: number
   }
   charts: {
     emissions_by_hour: Array<{ hour_bucket: string; total: number }>
@@ -79,9 +83,16 @@ export interface FiscalQueueItem {
   queued_at: string | null
   next_retry_at: string | null
   created_at: string
+  /** Segundos desde el último cambio de estado, y si ya se considera atascado. */
+  updated_at?: string
+  age_seconds?: number
+  stuck?: boolean
 }
 
-export type FiscalQueueGroup = 'queued' | 'processing' | 'failed' | 'retrying'
+/** Pestañas del monitor en vivo. Lo que ya falló se gestiona en Documentos fiscales. */
+export type FiscalQueueGroup = 'queued' | 'processing' | 'retrying' | 'stuck'
+
+export type FiscalQueueCounts = Record<FiscalQueueGroup, number> & { needs_action?: number }
 
 /**
  * Fase 8 (paginación): antes traía SIEMPRE los 4 buckets a la vez con un tope fijo de 50 cada
@@ -95,7 +106,7 @@ export interface FiscalQueueMonitor {
   total: number
   limit: number
   offset: number
-  counts: Record<FiscalQueueGroup, number>
+  counts: FiscalQueueCounts
   redis: { emit_queue: number; retry_scheduled: number }
 }
 
@@ -107,6 +118,9 @@ export interface FiscalAlertItem {
   severity: string
   message: string
   created_at: string
+  acknowledged_at?: string | null
+  resolved_at?: string | null
+  age_seconds?: number
 }
 
 export interface FiscalAuditTimeline {
@@ -246,7 +260,15 @@ export const fiscalOperationsService = {
       .then((r) => r.data),
 
   getAlerts: () =>
-    api.get<{ open_count: number; items: FiscalAlertItem[] }>('/superadmin/fiscal/alerts').then((r) => r.data),
+    api
+      .get<{ open_count: number; unacknowledged_count?: number; items: FiscalAlertItem[] }>('/superadmin/fiscal/alerts')
+      .then((r) => r.data),
+
+  /** "Reconocer": alguien ya la vio; deja de contar para el estado del sistema. Requiere fiscal.attend. */
+  acknowledgeAlert: (id: number) => api.post(`/superadmin/fiscal/alerts/${id}/acknowledge`).then((r) => r.data),
+
+  /** "Resolver": se cierra a mano. Si la condición sigue, la próxima detección abre una nueva. */
+  resolveAlert: (id: number) => api.post(`/superadmin/fiscal/alerts/${id}/resolve`).then((r) => r.data),
 
   getAuditTimeline: (uuid: string) =>
     api.get<FiscalAuditTimeline>(`/superadmin/fiscal/documents/${uuid}/audit-timeline`).then((r) => r.data),

@@ -22,6 +22,8 @@ const mocks = vi.hoisted(() => ({
   getAuditTimeline: vi.fn(),
   retryDocument: vi.fn(),
   cancelDocument: vi.fn(),
+  acknowledgeAlert: vi.fn(),
+  resolveAlert: vi.fn(),
 }))
 
 vi.mock('@/services/fiscal-operations.service', async () => {
@@ -51,14 +53,14 @@ const baseItem = {
 // según el group solicitado, igual que el backend real (items solo si coincide, counts siempre
 // completos para las 4 pestañas).
 function queueResponseFor(group: string, items: Array<Record<string, unknown>>) {
-  const matches = group === 'failed'
+  const matches = group === 'stuck'
   return {
     group,
     items: matches ? items : [],
     total: matches ? items.length : 0,
     limit: 25,
     offset: 0,
-    counts: { queued: 0, processing: 0, failed: items.length, retrying: 0 },
+    counts: { queued: 0, processing: 0, retrying: 0, stuck: items.length, needs_action: 17 },
     redis: { emit_queue: 0, retry_scheduled: 0 },
   }
 }
@@ -99,9 +101,9 @@ async function setup(items: Array<Record<string, unknown>>) {
   const user = userEvent.setup()
   render(<OperacionesFiscalesPage />)
   await waitFor(() => expect(screen.getByText(/monitor de cola/i)).toBeInTheDocument())
-  // La pestaña ahora se muestra traducida ("Con error"), no con el valor crudo del backend.
-  const failedTab = screen.getByRole('button', { name: /^con error/i })
-  await user.click(failedTab)
+  // Las filas se renderizan igual en cualquier pestaña en vivo; se usa "Atascados" (traducida).
+  const stuckTab = screen.getByRole('button', { name: /^atascados/i })
+  await user.click(stuckTab)
   await waitFor(() => expect(screen.getByText('tenant-x')).toBeInTheDocument())
   return user
 }
@@ -234,11 +236,11 @@ describe('OperacionesFiscalesPage — Fase 8 (paginación)', () => {
     await waitFor(() => expect(screen.getByText(/monitor de cola/i)).toBeInTheDocument())
 
     mocks.getQueue.mockClear()
-    const failedTab = screen.getByRole('button', { name: /^con error/i })
-    await user.click(failedTab)
+    const stuckTab = screen.getByRole('button', { name: /^atascados/i })
+    await user.click(stuckTab)
 
     await waitFor(() =>
-      expect(mocks.getQueue).toHaveBeenCalledWith(expect.objectContaining({ group: 'failed', offset: 0 }))
+      expect(mocks.getQueue).toHaveBeenCalledWith(expect.objectContaining({ group: 'stuck', offset: 0 }))
     )
   })
 
@@ -250,12 +252,133 @@ describe('OperacionesFiscalesPage — Fase 8 (paginación)', () => {
       total: 40,
       limit: 25,
       offset: 0,
-      counts: { queued: 40, processing: 0, failed: 0, retrying: 0 },
+      counts: { queued: 40, processing: 0, retrying: 0, stuck: 0, needs_action: 0 },
       redis: { emit_queue: 0, retry_scheduled: 0 },
     })
 
     render(<OperacionesFiscalesPage />)
 
     await waitFor(() => expect(screen.getByText('Mostrando 1-25 de 40')).toBeInTheDocument())
+  })
+})
+
+describe('OperacionesFiscalesPage — cola en vivo y alertas', () => {
+  const alertBase = {
+    id: 1,
+    tenant_slug: 'demo',
+    ruc: null,
+    alert_type: 'tenant_disconnected',
+    severity: 'warning',
+    message: 'Tenant desconectado: credenciales inválidas',
+    created_at: '2026-10-05T10:00:00+00:00',
+    acknowledged_at: null,
+    resolved_at: null,
+  }
+
+  async function renderWith(alerts: Array<Record<string, unknown>>, queueItems: Array<Record<string, unknown>> = []) {
+    mocks.getHealth.mockResolvedValue({
+      status: 'degraded', queue_status: { emit: 0, retry: 0, audit: 0 }, redis_connected: true, pending_jobs: 0, failed_jobs: 0,
+      worker_count: 1, worker_heartbeat_age_sec: 5, provider_status: {}, sunat_connectivity: { connected: 1, total: 1, ratio: 1 },
+      db_status: 'ok', open_alerts: alerts.length, critical_alerts: 0, checked_at: '2026-10-06T00:00:00+00:00',
+    })
+    mocks.getSummary.mockResolvedValue({
+      cards: { documents_today: 0, pending: 3, errors_today: 0, retries_today: 0, avg_duration_ms: null, tenants_connected: 1, tenants_with_error: 0, open_alerts: alerts.length, stuck: 2, needs_action: 17 },
+      charts: { emissions_by_hour: [], errors_by_provider: [], avg_duration_by_provider: [] },
+    })
+    mocks.getAlerts.mockResolvedValue({ open_count: alerts.length, items: alerts })
+    mocks.getQueue.mockResolvedValue({
+      group: 'queued', items: queueItems, total: queueItems.length, limit: 25, offset: 0,
+      counts: { queued: queueItems.length, processing: 0, retrying: 0, stuck: 2, needs_action: 17 },
+      redis: { emit_queue: 0, retry_scheduled: 0 },
+    })
+    mocks.acknowledgeAlert.mockResolvedValue({})
+    mocks.resolveAlert.mockResolvedValue({})
+    const user = userEvent.setup()
+    render(<OperacionesFiscalesPage />)
+    await waitFor(() => expect(screen.getByText(/monitor de cola/i)).toBeInTheDocument())
+    return user
+  }
+
+  beforeEach(() => {
+    Object.values(mocks).forEach((m) => m.mockReset())
+  })
+
+  it('la cola ofrece En cola, Procesando, Reintentando y Atascados — ya no "Con error"', async () => {
+    await renderWith([])
+    for (const name of [/^en cola/i, /^procesando/i, /^reintentando/i, /^atascados/i]) {
+      expect(screen.getByRole('button', { name })).toBeInTheDocument()
+    }
+    expect(screen.queryByRole('button', { name: /^con error/i })).not.toBeInTheDocument()
+  })
+
+  it('enlaza a Documentos fiscales con el conteo de lo que requiere acción', async () => {
+    await renderWith([])
+    const links = screen.getAllByRole('link', { name: /con error o rechazados por atender/i })
+    expect(links[0]).toHaveAttribute('href', '/fiscal?view=needs_action')
+    expect(links[0]).toHaveTextContent('17')
+  })
+
+  it('las tarjetas Por atender y Pendientes ahora son enlaces a la vista filtrada', async () => {
+    await renderWith([])
+    const hrefs = screen.getAllByRole('link').map((a) => a.getAttribute('href'))
+    expect(hrefs).toContain('/fiscal?view=needs_action')
+    expect(hrefs).toContain('/fiscal?view=processing')
+    expect(screen.getByRole('link', { name: /pendientes ahora/i })).toHaveAttribute('href', '/fiscal?view=processing')
+  })
+
+  it('una fila atascada muestra cuánto lleva y la marca "atascado"', async () => {
+    const user = await renderWith([], [
+      { ...baseItem, document_uuid: 'u-stuck', status: 'queued', age_seconds: 3600, stuck: true, updated_at: '2026-10-06T10:00:00+00:00' },
+    ])
+    await user.click(screen.getByRole('button', { name: /^en cola/i }))
+    await waitFor(() => expect(screen.getByText(/1 h · atascado/)).toBeInTheDocument())
+  })
+
+  it('"Reconocer" y "Resolver" llaman al backend con el id de la alerta', async () => {
+    const user = await renderWith([alertBase])
+    await waitFor(() => expect(screen.getByText(/credenciales inválidas/)).toBeInTheDocument())
+
+    await user.click(screen.getByRole('button', { name: 'Reconocer' }))
+    await waitFor(() => expect(mocks.acknowledgeAlert).toHaveBeenCalledWith(1))
+
+    await user.click(screen.getByRole('button', { name: 'Resolver' }))
+    await waitFor(() => expect(mocks.resolveAlert).toHaveBeenCalledWith(1))
+  })
+
+  it('las alertas reconocidas salen de "por revisar" y quedan en un bloque aparte', async () => {
+    const acked = { ...alertBase, id: 2, message: 'Otra ya vista', acknowledged_at: '2026-10-06T09:00:00+00:00' }
+    const user = await renderWith([alertBase, acked])
+    await waitFor(() => expect(screen.getByText(/credenciales inválidas/)).toBeInTheDocument())
+    expect(screen.queryByText('Otra ya vista')).not.toBeInTheDocument()
+    expect(screen.getByText(/1 por revisar · 1 reconocidas/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /ver reconocidas/i }))
+    expect(screen.getByText('Otra ya vista')).toBeInTheDocument()
+  })
+
+  it('sin alertas lo dice y explica que las que se normalizan se cierran solas', async () => {
+    await renderWith([])
+    expect(screen.getByText(/no hay alertas activas/i)).toBeInTheDocument()
+  })
+
+  it('cancelar pide confirmación y avisa que el documento queda atendido', async () => {
+    const user = await renderWith([], [{ ...baseItem, document_uuid: 'u-cancel', status: 'queued' }])
+    await waitFor(() => expect(screen.getByText('tenant-x')).toBeInTheDocument())
+
+    await user.click(screen.getByRole('button', { name: /cancelar/i }))
+    expect(screen.getByText(/queda marcado como/i)).toBeInTheDocument()
+    expect(mocks.cancelDocument).not.toHaveBeenCalled()
+
+    mocks.cancelDocument.mockResolvedValue({})
+    await user.click(screen.getByRole('button', { name: 'Cancelar documento' }))
+    await waitFor(() => expect(mocks.cancelDocument).toHaveBeenCalledWith('u-cancel'))
+  })
+
+  it('volver en el modal de cancelar no cancela nada', async () => {
+    const user = await renderWith([], [{ ...baseItem, document_uuid: 'u-keep', status: 'queued' }])
+    await waitFor(() => expect(screen.getByText('tenant-x')).toBeInTheDocument())
+    await user.click(screen.getByRole('button', { name: /cancelar/i }))
+    await user.click(screen.getByRole('button', { name: 'Volver' }))
+    expect(mocks.cancelDocument).not.toHaveBeenCalled()
   })
 })
