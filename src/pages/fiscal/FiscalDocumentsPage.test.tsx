@@ -159,7 +159,8 @@ describe('FiscalDocumentsPage — Fase 3', () => {
     render(<FiscalDocumentsPage />)
     await openDetailFor('tenant-transient')
 
-    expect(screen.getByRole('button', { name: 'Reintentar' })).toBeInTheDocument()
+    // La fila de la tabla también tiene su botón rápido; el del modal es el último.
+    expect(screen.getAllByRole('button', { name: 'Reintentar' }).length).toBeGreaterThan(1)
     // Aparece tanto en la fila de la tabla como en el badge del modal de detalle.
     expect(screen.getAllByText('En proceso').length).toBeGreaterThan(0)
   })
@@ -186,7 +187,8 @@ describe('FiscalDocumentsPage — Fase 3', () => {
     render(<FiscalDocumentsPage />)
     const user = await openDetailFor('tenant-transient')
 
-    await user.click(screen.getByRole('button', { name: 'Reintentar' }))
+    const retryButtons = screen.getAllByRole('button', { name: 'Reintentar' })
+    await user.click(retryButtons[retryButtons.length - 1])
 
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith(
@@ -298,7 +300,7 @@ describe('"Atendido" (2026-09-22) — independiente del status técnico, nunca s
     expect(screen.getByText(/no admite reenvío\/reintento/i)).toBeInTheDocument()
     // Aparece tanto en la fila de la tabla como en el badge del modal de detalle.
     expect(screen.getAllByText('Atendido').length).toBeGreaterThan(0)
-    expect(screen.getByText(/cliente resolvió por WhatsApp/)).toBeInTheDocument()
+    expect(screen.getAllByText(/cliente resolvió por WhatsApp/).length).toBeGreaterThan(0)
     expect(screen.getByText(/admin@tukifac.com/)).toBeInTheDocument()
   })
 

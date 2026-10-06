@@ -1,17 +1,18 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   RefreshCw,
-  Search,
-  FileText,
   AlertTriangle,
   CheckCircle2,
   Clock,
   Mail,
-  RotateCcw,
   Download,
   ChevronLeft,
   ChevronRight,
   Filter,
+  Search,
+  X,
+  FileSpreadsheet,
+  ClipboardCheck,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -20,10 +21,11 @@ import {
   FiscalDocumentSummary,
   FiscalFilters,
   FiscalStats,
+  FiscalView,
   downloadFiscalFile,
 } from '@/services/fiscal.service'
 import { tenantsService, Tenant } from '@/services/tenants.service'
-import { Card, CardBody, CardHeader } from '@/components/ui/Card'
+import { Card, CardBody } from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
 import Spinner from '@/components/ui/Spinner'
 import Modal from '@/components/ui/Modal'
@@ -40,69 +42,59 @@ import {
   isAttendable,
   attendedBadge,
 } from '@/lib/fiscalStatus'
+import {
+  DATE_PRESETS,
+  DatePreset,
+  docTypeLabel,
+  fiscalDocsToCsv,
+  formatLima,
+  normalizeRange,
+  parseSearchQuery,
+  rangeForPreset,
+} from '@/lib/fiscalFilters'
 
-const STORAGE_KEY = 'sa_fiscal_filters_v1'
-const PAGE_SIZE = 50
+const STORAGE_KEY = 'sa_fiscal_filters_v2'
+const PAGE_SIZES = [25, 50, 100, 200]
+const BULK_MAX = 200
+const EXPORT_MAX = 5000
+
+type Tab = 'pending' | 'history'
+type BulkAction = 'send' | 'retry' | 'force' | 'email' | 'poll'
 
 const DOC_TYPES = [
-  { v: '', l: 'Todos' },
+  { v: '', l: 'Todos los tipos' },
   { v: '01', l: 'Factura' },
   { v: '03', l: 'Boleta' },
-  { v: '07', l: 'Nota crédito' },
-  { v: '08', l: 'Nota débito' },
+  { v: '07', l: 'Nota de crédito' },
+  { v: '08', l: 'Nota de débito' },
   { v: '09', l: 'Guía' },
-  { v: 'RC', l: 'Resumen' },
-  { v: 'RA', l: 'Baja' },
+  { v: 'RC', l: 'Resumen diario' },
+  { v: 'RA', l: 'Comunicación de baja' },
 ]
 
-// Grupos de estado simplificados que ve el usuario (menos estados = menos confusión).
-// El valor 'v' es el parámetro ?group= que entiende el backend.
-const STATUS_OPTS = [
-  { v: '', l: 'Todos' },
+const PENDING_SUBS: { v: FiscalView; l: string }[] = [
+  { v: 'pending', l: 'Todos' },
+  { v: 'needs_action', l: 'Requieren acción' },
   { v: 'processing', l: 'En proceso' },
-  { v: 'accepted', l: 'Aceptado' },
-  { v: 'observed', l: 'Con observaciones' },
-  { v: 'rejected', l: 'Rechazado' },
-  { v: 'action', l: 'Requiere acción' },
-  { v: 'cancelled', l: 'Anulado' },
 ]
 
-// Filtro deliberadamente SEPARADO del status técnico de arriba: "atendido" es una decisión
-// administrativa (ver src/lib/fiscalStatus.ts), no un estado SUNAT/PSE — mezclarlo en el mismo
-// dropdown confundiría ambos conceptos, que es justo lo que se pidió evitar.
-const ATTENDED_OPTS = [
-  { v: '', l: 'Todos' },
-  { v: 'unattended', l: 'Solo no atendidos' },
-  { v: 'attended', l: 'Solo atendidos' },
+const HISTORY_SUBS: { v: FiscalView; l: string }[] = [
+  { v: 'history', l: 'Todo el historial' },
+  { v: 'accepted', l: 'Aceptados por SUNAT' },
+  { v: 'attended', l: 'Atendidos' },
 ]
 
-function KpiCard({
-  label,
-  value,
-  icon: Icon,
-  tone,
-}: {
-  label: string
-  value: number
-  icon: React.ElementType
-  tone: string
-}) {
-  return (
-    <Card>
-      <CardBody className="flex items-center gap-3 py-4">
-        <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${tone}`}>
-          <Icon size={18} className="text-white" />
-        </div>
-        <div>
-          <p className="text-xl font-bold text-slate-800">{value.toLocaleString()}</p>
-          <p className="text-xs text-slate-500">{label}</p>
-        </div>
-      </CardBody>
-    </Card>
-  )
+const BULK_LABELS: Record<BulkAction, string> = {
+  retry: 'Reintentar',
+  send: 'Enviar',
+  force: 'Forzar',
+  poll: 'Consultar estado',
+  email: 'Reenviar correo',
 }
 
-function loadSavedFilters(): FiscalFilters {
+type SavedFilters = Omit<FiscalFilters, 'view' | 'cursor' | 'offset' | 'limit' | 'include_total'>
+
+function loadSavedFilters(): SavedFilters {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     return raw ? JSON.parse(raw) : {}
@@ -111,50 +103,196 @@ function loadSavedFilters(): FiscalFilters {
   }
 }
 
+function KpiCard({
+  label,
+  hint,
+  value,
+  icon: Icon,
+  tone,
+  active,
+  onClick,
+}: {
+  label: string
+  hint?: string
+  value: number | undefined
+  icon: React.ElementType
+  tone: string
+  active?: boolean
+  onClick?: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={!onClick}
+      className={`text-left rounded-xl border bg-white shadow-sm transition ${
+        active ? 'border-indigo-400 ring-2 ring-indigo-100' : 'border-slate-200'
+      } ${onClick ? 'hover:border-indigo-300 cursor-pointer' : 'cursor-default'}`}
+    >
+      <CardBody className="flex items-center gap-3 py-4">
+        <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${tone}`}>
+          <Icon size={18} className="text-white" />
+        </div>
+        <div>
+          <p className="text-2xl font-bold text-slate-800">{(value ?? 0).toLocaleString()}</p>
+          <p className="text-xs font-medium text-slate-600">{label}</p>
+          {hint && <p className="text-[11px] text-slate-400">{hint}</p>}
+        </div>
+      </CardBody>
+    </button>
+  )
+}
+
+/** Selector de tenant con búsqueda en servidor (hay cientos: un <select> de 100 no alcanza). */
+function TenantPicker({
+  value,
+  onChange,
+}: {
+  value?: string
+  onChange: (slug: string | undefined) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [text, setText] = useState('')
+  const [results, setResults] = useState<Tenant[]>([])
+  const boxRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const id = setTimeout(() => {
+      tenantsService
+        .list({ page: 1, per_page: 15, q: text.trim() || undefined })
+        .then((r) => setResults(r.data ?? []))
+        .catch(() => setResults([]))
+    }, 250)
+    return () => clearTimeout(id)
+  }, [open, text])
+
+  useEffect(() => {
+    const close = (e: MouseEvent) => {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [])
+
+  return (
+    <div className="relative" ref={boxRef}>
+      <div className="flex items-center border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white">
+        <Search size={14} className="text-slate-400 mr-2 shrink-0" />
+        <input
+          className="flex-1 min-w-0 outline-none bg-transparent"
+          placeholder={value ? value : 'Todos los tenants — buscar por nombre o RUC'}
+          value={text}
+          onFocus={() => setOpen(true)}
+          onChange={(e) => {
+            setText(e.target.value)
+            setOpen(true)
+          }}
+        />
+        {value && (
+          <button
+            type="button"
+            aria-label="Quitar tenant"
+            onClick={() => {
+              onChange(undefined)
+              setText('')
+            }}
+            className="text-slate-400 hover:text-slate-700"
+          >
+            <X size={14} />
+          </button>
+        )}
+      </div>
+      {open && (
+        <div className="absolute z-20 mt-1 w-full max-h-64 overflow-auto bg-white border border-slate-200 rounded-lg shadow-lg">
+          {results.length === 0 && <p className="px-3 py-2 text-xs text-slate-400">Sin resultados</p>}
+          {results.map((t) => (
+            <button
+              type="button"
+              key={t.id}
+              className="block w-full text-left px-3 py-2 text-sm hover:bg-slate-50"
+              onClick={() => {
+                onChange(t.slug)
+                setText('')
+                setOpen(false)
+              }}
+            >
+              <span className="font-medium text-slate-800">{t.name}</span>
+              <span className="ml-2 text-xs text-slate-400">
+                {t.slug}
+                {t.ruc ? ` · ${t.ruc}` : ''}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function FiscalDocumentsPage() {
   const [stats, setStats] = useState<FiscalStats | null>(null)
   const [items, setItems] = useState<FiscalDocumentSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
-  const [tenants, setTenants] = useState<Tenant[]>([])
-  const [filters, setFilters] = useState<FiscalFilters>(() => ({
-    limit: PAGE_SIZE,
-    ...loadSavedFilters(),
-  }))
+  const [filters, setFilters] = useState<SavedFilters>(() => loadSavedFilters())
+  const [searchText, setSearchText] = useState('')
+  const [tab, setTab] = useState<Tab>('pending')
+  const [pendingSub, setPendingSub] = useState<FiscalView>('pending')
+  const [historySub, setHistorySub] = useState<FiscalView>('history')
+  const [pageSize, setPageSize] = useState(50)
+  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [autoRefresh, setAutoRefresh] = useState(false)
+  const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
   const [cursor, setCursor] = useState<string | null>(null)
   const [cursorHistory, setCursorHistory] = useState<(string | null)[]>([null])
   const [historyIndex, setHistoryIndex] = useState(0)
   const [hasMore, setHasMore] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [selectAllFilter, setSelectAllFilter] = useState(false)
   const [detail, setDetail] = useState<FiscalDocumentDetail | null>(null)
   const [detailOpen, setDetailOpen] = useState(false)
   const [detailLoading, setDetailLoading] = useState(false)
+  const [bulkAsk, setBulkAsk] = useState<BulkAction | 'attend' | null>(null)
+  const [bulkReason, setBulkReason] = useState('')
   const [bulkLoading, setBulkLoading] = useState(false)
   const [attendTarget, setAttendTarget] = useState<string | null>(null)
   const [attendReason, setAttendReason] = useState('')
   const [attendSubmitting, setAttendSubmitting] = useState(false)
+  const [exporting, setExporting] = useState(false)
 
-  const filterQuery = useMemo(() => {
-    const { cursor: _c, offset: _o, ...rest } = filters
-    return rest
+  const view: FiscalView = tab === 'pending' ? pendingSub : historySub
+
+  // Texto libre -> serie/correlativo/RUC/cliente, con espera para no consultar en cada tecla.
+  useEffect(() => {
+    const id = setTimeout(() => {
+      const parsed = parseSearchQuery(searchText)
+      setFilters((f) => {
+        const { series: _s, number: _n, company_ruc: _r, customer_name: _c, ...rest } = f
+        const next = { ...rest, ...parsed }
+        return JSON.stringify(next) === JSON.stringify(f) ? f : next
+      })
+    }, 400)
+    return () => clearTimeout(id)
+  }, [searchText])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(filters))
+    } catch {
+      /* almacenamiento no disponible: no es crítico */
+    }
   }, [filters])
 
+  const listQuery = useMemo<FiscalFilters>(() => ({ ...filters, view }), [filters, view])
+
   const fetchStats = useCallback(async () => {
-    const data = await fiscalService.getStats({
-      tenant_slug: filters.tenant_slug,
-      from: filters.from,
-      to: filters.to,
-    })
-    setStats(data)
-  }, [filters.tenant_slug, filters.from, filters.to])
+    setStats(await fiscalService.getStats(filters))
+  }, [filters])
 
   const fetchDocuments = useCallback(
     async (pageCursor?: string | null) => {
-      const q: FiscalFilters = {
-        ...filterQuery,
-        limit: PAGE_SIZE,
-        cursor: pageCursor || undefined,
-      }
+      const q: FiscalFilters = { ...listQuery, limit: pageSize, cursor: pageCursor || undefined }
       if (!pageCursor) {
         q.offset = 0
         q.include_total = false
@@ -164,35 +302,37 @@ export default function FiscalDocumentsPage() {
       setHasMore(!!data.has_more)
       setCursor(data.next_cursor || null)
     },
-    [filterQuery]
+    [listQuery, pageSize]
   )
 
-  const reload = useCallback(async () => {
-    setLoading(true)
-    setCursorHistory([null])
-    setHistoryIndex(0)
-    try {
-      await Promise.all([fetchStats(), fetchDocuments(null)])
-    } catch {
-      toast.error('No se pudo cargar documentos fiscales')
-    } finally {
-      setLoading(false)
-    }
-  }, [fetchStats, fetchDocuments])
+  const reload = useCallback(
+    async (silent = false) => {
+      if (!silent) setLoading(true)
+      setCursorHistory([null])
+      setHistoryIndex(0)
+      try {
+        await Promise.all([fetchStats(), fetchDocuments(null)])
+        setLastUpdate(new Date())
+      } catch {
+        toast.error('No se pudo cargar documentos fiscales')
+      } finally {
+        setLoading(false)
+      }
+    },
+    [fetchStats, fetchDocuments]
+  )
 
   useEffect(() => {
-    tenantsService.list({ page: 1, per_page: 100 }).then(r => setTenants(r.data)).catch(() => {})
-  }, [])
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(filterQuery))
-  }, [filterQuery])
-
-  useEffect(() => {
+    setSelected(new Set())
+    setSelectAllFilter(false)
     reload()
-  }, [filterQuery])
+  }, [reload])
 
-  const applyFilters = () => reload()
+  useEffect(() => {
+    if (!autoRefresh) return
+    const id = setInterval(() => reload(true), 30000)
+    return () => clearInterval(id)
+  }, [autoRefresh, reload])
 
   const nextPage = async () => {
     if (!cursor) return
@@ -224,8 +364,7 @@ export default function FiscalDocumentsPage() {
     setDetailLoading(true)
     setDetail(null)
     try {
-      const d = await fiscalService.getDocument(uuid)
-      setDetail(d)
+      setDetail(await fiscalService.getDocument(uuid))
     } catch {
       toast.error('No se pudo cargar el detalle')
       setDetailOpen(false)
@@ -234,7 +373,51 @@ export default function FiscalDocumentsPage() {
     }
   }
 
+  // ---- filtros -----------------------------------------------------------------------------
+  const setFilter = <K extends keyof SavedFilters>(key: K, value: SavedFilters[K] | undefined) =>
+    setFilters((f) => {
+      const next = { ...f }
+      if (value === undefined || value === '' || value === false) delete next[key]
+      else next[key] = value
+      return next
+    })
+
+  const setRange = (from?: string, to?: string) => {
+    const r = normalizeRange(from, to)
+    setFilters((f) => {
+      const { from: _f, to: _t, ...rest } = f
+      return { ...rest, ...(r.from ? { from: r.from } : {}), ...(r.to ? { to: r.to } : {}) }
+    })
+  }
+
+  const applyPreset = (p: DatePreset) => {
+    const r = rangeForPreset(p)
+    setRange(r.from, r.to)
+  }
+
+  const activePreset = DATE_PRESETS.find((p) => {
+    const r = rangeForPreset(p.id)
+    return r.from === filters.from && r.to === filters.to
+  })?.id
+
+  const clearFilters = () => {
+    setFilters({})
+    setSearchText('')
+  }
+
+  const chips: { key: string; label: string; clear: () => void }[] = []
+  if (filters.tenant_slug) chips.push({ key: 'tenant', label: `Tenant: ${filters.tenant_slug}`, clear: () => setFilter('tenant_slug', undefined) })
+  if (filters.from || filters.to)
+    chips.push({ key: 'range', label: `Fechas: ${filters.from ?? '…'} → ${filters.to ?? '…'}`, clear: () => setRange() })
+  if (filters.document_type) chips.push({ key: 'type', label: `Tipo: ${docTypeLabel(filters.document_type)}`, clear: () => setFilter('document_type', undefined) })
+  if (searchText.trim()) chips.push({ key: 'q', label: `Búsqueda: ${searchText.trim()}`, clear: () => setSearchText('') })
+  if (filters.provider) chips.push({ key: 'prov', label: `Proveedor: ${filters.provider}`, clear: () => setFilter('provider', undefined) })
+  if (filters.send_mode) chips.push({ key: 'mode', label: `Modo: ${sendModeLabel(filters.send_mode)}`, clear: () => setFilter('send_mode', undefined) })
+  if (filters.customer_email) chips.push({ key: 'mail', label: `Email: ${filters.customer_email}`, clear: () => setFilter('customer_email', undefined) })
+
+  // ---- selección / acciones ----------------------------------------------------------------
   const toggleSelect = (uuid: string) => {
+    setSelectAllFilter(false)
     setSelected((prev) => {
       const n = new Set(prev)
       if (n.has(uuid)) n.delete(uuid)
@@ -243,34 +426,52 @@ export default function FiscalDocumentsPage() {
     })
   }
 
-  // Un documento atendido no admite ninguna acción (ver fiscalStatus.ts) — no tiene sentido
-  // dejarlo seleccionable para lote, ya que el backend lo omitiría en silencio de todas formas.
+  // Un documento atendido no admite ninguna acción — no se deja seleccionable para lote.
   const selectableItems = useMemo(() => items.filter((i) => !i.attended), [items])
 
   const toggleAll = () => {
+    setSelectAllFilter(false)
     if (selected.size === selectableItems.length && selectableItems.length > 0) setSelected(new Set())
     else setSelected(new Set(selectableItems.map((i) => i.document_uuid)))
   }
 
-  const runBulk = async (action: 'send' | 'retry' | 'force' | 'email' | 'poll') => {
-    if (action === 'force' && !window.confirm(
-      'Forzar reenvía documentos sin respetar las reglas normales de send/retry (incluye aceptados, rechazos de negocio y los que requieren acción manual). ¿Continuar?'
-    )) {
-      return
-    }
+  const viewTotal = stats?.views?.[view]
+  const bulkCount = selectAllFilter ? Math.min(viewTotal ?? 0, BULK_MAX) : selected.size
+  const canSelectWholeFilter =
+    !selectAllFilter && selected.size > 0 && selected.size === selectableItems.length && (viewTotal ?? 0) > selected.size
+
+  const runBulk = async () => {
+    const action = bulkAsk
+    if (!action) return
     setBulkLoading(true)
     try {
-      const payload =
-        selected.size > 0
-          ? { document_uuids: Array.from(selected), max: 200 }
-          : { filters: { ...filterQuery }, max: 200 }
-      const res = await fiscalService.bulkAction(action, payload)
-      const skipped = res.skipped ?? 0
-      toast.success(
-        `Bulk ${action}: ${res.queued ?? 0} encolados` +
-          (skipped > 0 ? ` · ${skipped} omitidos por regla fiscal (accepted/business/permanent/manual_only) o por estar atendidos` : '')
-      )
+      if (action === 'attend') {
+        const reason = bulkReason.trim() || undefined
+        const uuids = Array.from(selected)
+        let ok = 0
+        let fail = 0
+        for (let i = 0; i < uuids.length; i += 5) {
+          const res = await Promise.allSettled(uuids.slice(i, i + 5).map((u) => fiscalService.attendDocument(u, reason)))
+          res.forEach((r) => (r.status === 'fulfilled' ? ok++ : fail++))
+        }
+        if (ok > 0) toast.success(`${ok} documento(s) marcados como atendidos`)
+        if (fail > 0) toast.error(`${fail} no se pudieron marcar (estado no admite "atendido")`)
+      } else {
+        const payload =
+          !selectAllFilter && selected.size > 0
+            ? { document_uuids: Array.from(selected), max: BULK_MAX }
+            : { filters: { ...listQuery } as Record<string, unknown>, max: BULK_MAX }
+        const res = await fiscalService.bulkAction(action, payload)
+        const skipped = res.skipped ?? 0
+        toast.success(
+          `${BULK_LABELS[action]}: ${res.queued ?? 0} encolados` +
+            (skipped > 0 ? ` · ${skipped} omitidos por regla fiscal o por estar atendidos` : '')
+        )
+      }
+      setBulkAsk(null)
+      setBulkReason('')
       setSelected(new Set())
+      setSelectAllFilter(false)
       reload()
     } catch (err) {
       toast.error(fiscalActionErrorMessage(err, 'Error en acción masiva'))
@@ -279,17 +480,26 @@ export default function FiscalDocumentsPage() {
     }
   }
 
-  const runAction = async (uuid: string, action: 'send' | 'retry' | 'force' | 'email' | 'poll', doc?: { status: string; error_type?: string | null }) => {
-    if (action === 'force' && doc && needsForceConfirmation(doc.status, doc.error_type) && !window.confirm(
-      'Este documento está aceptado, es un rechazo de negocio, o requiere acción manual. Forzar el reenvío es una acción administrativa explícita. ¿Continuar?'
-    )) {
+  const runAction = async (
+    uuid: string,
+    action: BulkAction,
+    doc?: { status: string; error_type?: string | null }
+  ) => {
+    if (
+      action === 'force' &&
+      doc &&
+      needsForceConfirmation(doc.status, doc.error_type) &&
+      !window.confirm(
+        'Este documento está aceptado, es un rechazo de negocio, o requiere acción manual. Forzar el reenvío es una acción administrativa explícita. ¿Continuar?'
+      )
+    ) {
       return
     }
     try {
       await fiscalService.documentAction(uuid, action)
       toast.success(`Acción ${action} encolada`)
       if (detail?.document.document_uuid === uuid) openDetail(uuid)
-      reload()
+      reload(true)
     } catch (err) {
       toast.error(fiscalActionErrorMessage(err, 'Error en acción'))
     }
@@ -306,10 +516,10 @@ export default function FiscalDocumentsPage() {
     setAttendSubmitting(true)
     try {
       await fiscalService.attendDocument(uuid, attendReason.trim() || undefined)
-      toast.success('Documento marcado como atendido')
+      toast.success('Documento marcado como atendido: pasó al historial')
       setAttendTarget(null)
       if (detail?.document.document_uuid === uuid) openDetail(uuid)
-      reload()
+      reload(true)
     } catch (err) {
       toast.error(fiscalActionErrorMessage(err, 'No se pudo marcar como atendido'))
     } finally {
@@ -320,11 +530,45 @@ export default function FiscalDocumentsPage() {
   const unattendDocument = async (uuid: string) => {
     try {
       await fiscalService.unattendDocument(uuid)
-      toast.success('Se quitó "atendido" del documento')
+      toast.success('Se quitó "atendido": el documento volvió a pendientes')
       if (detail?.document.document_uuid === uuid) openDetail(uuid)
-      reload()
+      reload(true)
     } catch (err) {
       toast.error(fiscalActionErrorMessage(err, 'No se pudo quitar "atendido"'))
+    }
+  }
+
+  const exportCsv = async () => {
+    setExporting(true)
+    try {
+      const all: FiscalDocumentSummary[] = []
+      let cur: string | undefined
+      while (all.length < EXPORT_MAX) {
+        const data = await fiscalService.listDocuments({ ...listQuery, limit: 200, cursor: cur, include_total: false })
+        all.push(...(data.items || []))
+        if (!data.has_more || !data.next_cursor) break
+        cur = data.next_cursor
+      }
+      const blob = new Blob([fiscalDocsToCsv(all)], { type: 'text/csv;charset=utf-8' })
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `documentos-fiscales-${new Date().toISOString().slice(0, 10)}.csv`
+      a.click()
+      window.URL.revokeObjectURL(url)
+      toast.success(`${all.length} documentos exportados${all.length >= EXPORT_MAX ? ` (tope ${EXPORT_MAX})` : ''}`)
+    } catch {
+      toast.error('No se pudo exportar')
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  const goTab = (t: Tab, sub?: FiscalView) => {
+    setTab(t)
+    if (sub) {
+      if (t === 'pending') setPendingSub(sub)
+      else setHistorySub(sub)
     }
   }
 
@@ -336,296 +580,400 @@ export default function FiscalDocumentsPage() {
     )
   }
 
+  const views = stats?.views ?? {}
+  const subs = tab === 'pending' ? PENDING_SUBS : HISTORY_SUBS
+  const currentSub = tab === 'pending' ? pendingSub : historySub
+  const failureText = (d: FiscalDocumentSummary): string => {
+    if (d.attended) return d.attended_reason ? `Atendido: ${d.attended_reason}` : 'Atendido'
+    if (d.status === 'accepted' || d.status === 'observed') return ''
+    if (d.next_retry_at) return `Reintento: ${formatLima(d.next_retry_at)}`
+    return d.sunat_message || ''
+  }
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">Documentos fiscales</h1>
-          <p className="text-sm text-slate-500">Panel global SaaS — source of truth: facturador_lycet</p>
+          <p className="text-sm text-slate-500">
+            Gestiona solo lo pendiente. Lo aceptado por SUNAT o ya atendido pasa al historial.
+          </p>
         </div>
-        <button
-          type="button"
-          onClick={reload}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm hover:bg-slate-50"
-        >
-          <RefreshCw size={16} /> Actualizar
-        </button>
+        <div className="flex items-center gap-2">
+          <label className="flex items-center gap-1.5 text-xs text-slate-500">
+            <input type="checkbox" checked={autoRefresh} onChange={(e) => setAutoRefresh(e.target.checked)} />
+            Auto-actualizar (30 s)
+          </label>
+          {lastUpdate && (
+            <span className="text-xs text-slate-400">{lastUpdate.toLocaleTimeString('es-PE', { timeZone: 'America/Lima' })}</span>
+          )}
+          <button
+            type="button"
+            onClick={() => reload()}
+            className="inline-flex items-center gap-2 px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg hover:bg-slate-50"
+          >
+            <RefreshCw size={15} className={loading ? 'animate-spin' : ''} /> Actualizar
+          </button>
+        </div>
       </div>
 
       {stats && (
-        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
-          <KpiCard label="Hoy" value={stats.documents_today} icon={FileText} tone="bg-indigo-500" />
-          <KpiCard label="Aceptados" value={stats.accepted} icon={CheckCircle2} tone="bg-emerald-500" />
-          <KpiCard label="Rechazados" value={stats.rejected} icon={AlertTriangle} tone="bg-red-500" />
-          <KpiCard label="Pendientes" value={stats.pending} icon={Clock} tone="bg-amber-500" />
-          <KpiCard label="En cola" value={stats.in_queue} icon={Clock} tone="bg-slate-500" />
-          <KpiCard label="Errores" value={stats.errors} icon={AlertTriangle} tone="bg-orange-500" />
-          <KpiCard label="Retry" value={stats.retries} icon={RotateCcw} tone="bg-violet-500" />
-          <KpiCard label="Emails pend." value={stats.emails_pending} icon={Mail} tone="bg-sky-500" />
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <KpiCard
+            label="Por atender"
+            hint="Error, rechazados o anulados sin atender"
+            value={views.needs_action}
+            icon={AlertTriangle}
+            tone="bg-red-500"
+            active={tab === 'pending' && pendingSub === 'needs_action'}
+            onClick={() => goTab('pending', 'needs_action')}
+          />
+          <KpiCard
+            label="En proceso"
+            hint="En cola o reintentando solos"
+            value={views.processing}
+            icon={Clock}
+            tone="bg-amber-500"
+            active={tab === 'pending' && pendingSub === 'processing'}
+            onClick={() => goTab('pending', 'processing')}
+          />
+          <KpiCard label="Emails pendientes" hint="Comprobantes sin correo enviado" value={stats.emails_pending} icon={Mail} tone="bg-sky-500" />
         </div>
       )}
 
       <Card>
-        <CardHeader className="flex items-center gap-2 text-slate-700">
-          <Filter size={18} /> Filtros
-        </CardHeader>
-        <CardBody className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 gap-3">
-          <select
-            className="border border-slate-200 rounded-lg px-3 py-2 text-sm"
-            value={filters.tenant_slug || ''}
-            onChange={(e) => setFilters((f) => ({ ...f, tenant_slug: e.target.value || undefined }))}
-          >
-            <option value="">Todos los tenants</option>
-            {tenants.map((t) => (
-              <option key={t.id} value={t.slug}>
-                {t.name} ({t.slug})
-              </option>
+        <CardBody className="space-y-3">
+          <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+            <Filter size={16} /> Filtros
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <TenantPicker value={filters.tenant_slug} onChange={(s) => setFilter('tenant_slug', s)} />
+            <div className="flex items-center border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white">
+              <Search size={14} className="text-slate-400 mr-2 shrink-0" />
+              <input
+                className="flex-1 min-w-0 outline-none bg-transparent"
+                placeholder="Serie-número (F001-123), RUC o cliente"
+                value={searchText}
+                onChange={(e) => setSearchText(e.target.value)}
+              />
+            </div>
+            <select
+              value={filters.document_type ?? ''}
+              onChange={(e) => setFilter('document_type', e.target.value || undefined)}
+              className="border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white"
+            >
+              {DOC_TYPES.map((o) => (
+                <option key={o.v} value={o.v}>
+                  {o.l}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {DATE_PRESETS.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => applyPreset(p.id)}
+                className={`px-3 py-1 text-xs rounded-full border ${
+                  activePreset === p.id
+                    ? 'bg-indigo-600 text-white border-indigo-600'
+                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                }`}
+              >
+                {p.label}
+              </button>
             ))}
-          </select>
-          <input
-            placeholder="RUC empresa"
-            className="border border-slate-200 rounded-lg px-3 py-2 text-sm"
-            value={filters.company_ruc || ''}
-            onChange={(e) => setFilters((f) => ({ ...f, company_ruc: e.target.value || undefined }))}
-          />
-          <input
-            type="date"
-            className="border border-slate-200 rounded-lg px-3 py-2 text-sm"
-            value={filters.from?.slice(0, 10) || ''}
-            onChange={(e) => setFilters((f) => ({ ...f, from: e.target.value || undefined }))}
-          />
-          <input
-            type="date"
-            className="border border-slate-200 rounded-lg px-3 py-2 text-sm"
-            value={filters.to?.slice(0, 10) || ''}
-            onChange={(e) => setFilters((f) => ({ ...f, to: e.target.value || undefined }))}
-          />
-          <select
-            className="border border-slate-200 rounded-lg px-3 py-2 text-sm"
-            value={filters.document_type || ''}
-            onChange={(e) => setFilters((f) => ({ ...f, document_type: e.target.value || undefined }))}
-          >
-            {DOC_TYPES.map((o) => (
-              <option key={o.v} value={o.v}>
-                {o.l}
-              </option>
-            ))}
-          </select>
-          <select
-            className="border border-slate-200 rounded-lg px-3 py-2 text-sm"
-            value={filters.group || ''}
-            onChange={(e) => setFilters((f) => ({ ...f, group: e.target.value || undefined, status: undefined }))}
-          >
-            {STATUS_OPTS.map((o) => (
-              <option key={o.v} value={o.v}>
-                {o.l}
-              </option>
-            ))}
-          </select>
-          <select
-            className="border border-slate-200 rounded-lg px-3 py-2 text-sm"
-            value={filters.attended_only ? 'attended' : filters.unattended_only ? 'unattended' : ''}
-            onChange={(e) => {
-              const v = e.target.value
-              setFilters((f) => ({
-                ...f,
-                attended_only: v === 'attended' ? true : undefined,
-                unattended_only: v === 'unattended' ? true : undefined,
-              }))
-            }}
-          >
-            {ATTENDED_OPTS.map((o) => (
-              <option key={o.v} value={o.v}>
-                {o.l}
-              </option>
-            ))}
-          </select>
-          <input
-            placeholder="Serie"
-            className="border border-slate-200 rounded-lg px-3 py-2 text-sm"
-            value={filters.series || ''}
-            onChange={(e) => setFilters((f) => ({ ...f, series: e.target.value || undefined }))}
-          />
-          <input
-            placeholder="Correlativo"
-            className="border border-slate-200 rounded-lg px-3 py-2 text-sm"
-            value={filters.number || ''}
-            onChange={(e) => setFilters((f) => ({ ...f, number: e.target.value || undefined }))}
-          />
-          <input
-            placeholder="Cliente"
-            className="border border-slate-200 rounded-lg px-3 py-2 text-sm"
-            value={filters.customer_name || ''}
-            onChange={(e) => setFilters((f) => ({ ...f, customer_name: e.target.value || undefined }))}
-          />
-          <input
-            placeholder="Email cliente"
-            className="border border-slate-200 rounded-lg px-3 py-2 text-sm"
-            value={filters.customer_email || ''}
-            onChange={(e) => setFilters((f) => ({ ...f, customer_email: e.target.value || undefined }))}
-          />
-          <select
-            className="border border-slate-200 rounded-lg px-3 py-2 text-sm"
-            value={filters.provider || ''}
-            onChange={(e) => setFilters((f) => ({ ...f, provider: e.target.value || undefined }))}
-          >
-            <option value="">Proveedor</option>
-            <option value="sunat">SUNAT</option>
-            <option value="pse">PSE</option>
-          </select>
-          <select
-            className="border border-slate-200 rounded-lg px-3 py-2 text-sm"
-            value={filters.send_mode || ''}
-            onChange={(e) => setFilters((f) => ({ ...f, send_mode: e.target.value || undefined }))}
-          >
-            <option value="">Modo envío</option>
-            <option value="sunat">SUNAT directo</option>
-            <option value="pse">PSE</option>
-          </select>
-          <label className="flex items-center gap-2 text-sm text-slate-600">
             <input
-              type="checkbox"
-              checked={!!filters.errors_only}
-              onChange={(e) => setFilters((f) => ({ ...f, errors_only: e.target.checked || undefined }))}
+              type="date"
+              value={filters.from ?? ''}
+              onChange={(e) => setRange(e.target.value || undefined, filters.to)}
+              className="border border-slate-200 rounded-lg px-2 py-1 text-xs"
+              aria-label="Desde"
             />
-            Solo errores
-          </label>
-          <label className="flex items-center gap-2 text-sm text-slate-600">
+            <span className="text-xs text-slate-400">a</span>
             <input
-              type="checkbox"
-              checked={!!filters.pending_only}
-              onChange={(e) => setFilters((f) => ({ ...f, pending_only: e.target.checked || undefined }))}
+              type="date"
+              value={filters.to ?? ''}
+              onChange={(e) => setRange(filters.from, e.target.value || undefined)}
+              className="border border-slate-200 rounded-lg px-2 py-1 text-xs"
+              aria-label="Hasta"
             />
-            Solo pendientes
-          </label>
-          <label className="flex items-center gap-2 text-sm text-slate-600">
-            <input
-              type="checkbox"
-              checked={!!filters.retry_only}
-              onChange={(e) => setFilters((f) => ({ ...f, retry_only: e.target.checked || undefined }))}
-            />
-            Solo reintentos
-          </label>
-          <button
-            type="button"
-            onClick={applyFilters}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700"
-          >
-            <Search size={16} /> Buscar
-          </button>
+            <button
+              type="button"
+              onClick={() => setShowAdvanced((v) => !v)}
+              className="ml-auto text-xs text-indigo-600 hover:underline"
+            >
+              {showAdvanced ? 'Ocultar filtros avanzados' : 'Más filtros'}
+            </button>
+          </div>
+
+          {showAdvanced && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <select
+                value={filters.provider ?? ''}
+                onChange={(e) => setFilter('provider', e.target.value || undefined)}
+                className="border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white"
+              >
+                <option value="">Proveedor: todos</option>
+                <option value="sunat">SUNAT</option>
+                <option value="pse">PSE</option>
+              </select>
+              <select
+                value={filters.send_mode ?? ''}
+                onChange={(e) => setFilter('send_mode', e.target.value || undefined)}
+                className="border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white"
+              >
+                <option value="">Modo de envío: todos</option>
+                <option value="sunat">SUNAT directo</option>
+                <option value="pse">PSE</option>
+              </select>
+              <input
+                value={filters.customer_email ?? ''}
+                onChange={(e) => setFilter('customer_email', e.target.value || undefined)}
+                placeholder="Email del cliente"
+                className="border border-slate-200 rounded-lg px-3 py-2 text-sm"
+              />
+            </div>
+          )}
+
+          {chips.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              {chips.map((c) => (
+                <span key={c.key} className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-indigo-50 text-indigo-700 rounded-full">
+                  {c.label}
+                  <button type="button" onClick={c.clear} aria-label={`Quitar ${c.label}`}>
+                    <X size={12} />
+                  </button>
+                </span>
+              ))}
+              <button type="button" onClick={clearFilters} className="text-xs text-slate-500 hover:underline">
+                Limpiar todo
+              </button>
+            </div>
+          )}
         </CardBody>
       </Card>
 
       <Card>
-        <CardHeader className="flex flex-wrap items-center justify-between gap-2">
-          <span className="font-semibold text-slate-700">
-            {items.length} documentos {selected.size > 0 && `· ${selected.size} seleccionados`}
-          </span>
-          <p className="flex flex-wrap gap-2">
-            {(['retry', 'send', 'force', 'poll', 'email'] as const).map((a) => (
+        <div className="flex flex-wrap items-center gap-2 px-4 pt-3 border-b border-slate-100">
+          {(
+            [
+              { t: 'pending' as Tab, l: 'Pendientes', n: views.pending },
+              { t: 'history' as Tab, l: 'Historial', n: views.history },
+            ]
+          ).map((x) => (
+            <button
+              key={x.t}
+              type="button"
+              onClick={() => setTab(x.t)}
+              className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${
+                tab === x.t ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              {x.l}
+              <span className="ml-2 text-xs px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-600">{(x.n ?? 0).toLocaleString()}</span>
+            </button>
+          ))}
+          <div className="ml-auto flex items-center gap-1 pb-2">
+            {subs.map((s) => (
               <button
-                key={a}
+                key={s.v}
                 type="button"
-                disabled={bulkLoading}
-                onClick={() => runBulk(a)}
-                className="px-3 py-1.5 text-xs bg-slate-100 hover:bg-slate-200 rounded-lg disabled:opacity-50"
+                onClick={() => (tab === 'pending' ? setPendingSub(s.v) : setHistorySub(s.v))}
+                className={`px-3 py-1 text-xs rounded-full border ${
+                  currentSub === s.v ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                }`}
               >
-                {actionLabel(a)} (lote)
+                {s.l}
+                {views[s.v] !== undefined && <span className="ml-1 opacity-70">({views[s.v]})</span>}
               </button>
             ))}
-          </p>
-        </CardHeader>
-        <CardBody className="p-0 overflow-x-auto">
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
+          <div className="text-sm text-slate-600">
+            <span className="font-semibold text-slate-800">{(viewTotal ?? items.length).toLocaleString()} documentos</span>
+            {selected.size > 0 && <span className="ml-3 text-indigo-700">{selected.size} seleccionados</span>}
+            {canSelectWholeFilter && (
+              <button type="button" className="ml-3 text-xs text-indigo-600 hover:underline" onClick={() => setSelectAllFilter(true)}>
+                Seleccionar los {viewTotal} del filtro (máx. {BULK_MAX} por lote)
+              </button>
+            )}
+            {selectAllFilter && <span className="ml-3 text-xs text-indigo-700">Se aplicará al filtro completo (hasta {BULK_MAX})</span>}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {tab === 'pending' && (
+              <>
+                {(['retry', 'send', 'force', 'poll', 'email'] as BulkAction[]).map((a) => (
+                  <button
+                    key={a}
+                    type="button"
+                    disabled={bulkLoading || (selected.size === 0 && !selectAllFilter)}
+                    onClick={() => setBulkAsk(a)}
+                    className="px-2.5 py-1.5 text-xs bg-slate-100 rounded-lg hover:bg-slate-200 disabled:opacity-40"
+                  >
+                    {BULK_LABELS[a]} (lote)
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  disabled={bulkLoading || selected.size === 0}
+                  onClick={() => setBulkAsk('attend')}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-lg hover:bg-emerald-100 disabled:opacity-40"
+                >
+                  <ClipboardCheck size={13} /> Marcar atendidos (lote)
+                </button>
+              </>
+            )}
+            <button
+              type="button"
+              onClick={exportCsv}
+              disabled={exporting}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-40"
+            >
+              <FileSpreadsheet size={13} /> {exporting ? 'Exportando…' : 'Exportar CSV'}
+            </button>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-slate-600">
+            <thead className="bg-slate-50 text-left text-xs text-slate-500">
               <tr>
-                <th className="p-3 w-8">
+                <th className="px-3 py-2 w-8">
                   <input
                     type="checkbox"
-                    checked={selected.size === selectableItems.length && selectableItems.length > 0}
-                    disabled={selectableItems.length === 0}
+                    aria-label="Seleccionar todos"
+                    checked={selected.size > 0 && selected.size === selectableItems.length}
                     onChange={toggleAll}
-                    title={selectableItems.length === 0 ? 'Ningún documento de esta página admite selección (todos atendidos)' : undefined}
                   />
                 </th>
-                <th className="p-3 text-left">Tenant</th>
-                <th className="p-3 text-left">RUC</th>
-                <th className="p-3 text-left">Tipo</th>
-                <th className="p-3 text-left">Serie-Núm</th>
-                <th className="p-3 text-left">Cliente</th>
-                <th className="p-3 text-left">Fecha</th>
-                <th className="p-3 text-left">Estado</th>
-                <th className="p-3 text-left">Atendido</th>
-                <th className="p-3 text-left">Proveedor</th>
-                <th className="p-3 text-right">Monto</th>
-                <th className="p-3 text-left">Email</th>
-                <th className="p-3 text-center">Reintentos</th>
+                <th className="px-3 py-2">Tenant</th>
+                <th className="px-3 py-2">Documento</th>
+                <th className="px-3 py-2">Cliente</th>
+                <th className="px-3 py-2">Emisión (Lima)</th>
+                <th className="px-3 py-2">Estado</th>
+                <th className="px-3 py-2">Detalle / motivo</th>
+                <th className="px-3 py-2 text-right">Monto</th>
+                <th className="px-3 py-2">Email</th>
+                <th className="px-3 py-2 text-right">Reint.</th>
+                <th className="px-3 py-2">Acciones</th>
               </tr>
             </thead>
             <tbody>
-              {items.map((doc) => (
-                <tr
-                  key={doc.document_uuid}
-                  className="border-t border-slate-100 hover:bg-slate-50 cursor-pointer"
-                  onClick={() => openDetail(doc.document_uuid)}
-                >
-                  <td className="p-3" onClick={(e) => e.stopPropagation()}>
-                    <input
-                      type="checkbox"
-                      checked={selected.has(doc.document_uuid)}
-                      disabled={doc.attended}
-                      onChange={() => toggleSelect(doc.document_uuid)}
-                      title={doc.attended ? 'Documento atendido — no admite acciones' : undefined}
-                    />
-                  </td>
-                  <td className="p-3 font-medium">{doc.tenant_slug}</td>
-                  <td className="p-3 text-slate-500">{doc.company_ruc || '—'}</td>
-                  <td className="p-3">{doc.document_type}</td>
-                  <td className="p-3 font-mono text-xs">
-                    {doc.series}-{doc.number}
-                  </td>
-                  <td className="p-3 max-w-[140px] truncate">{doc.customer_name || '—'}</td>
-                  <td className="p-3 text-slate-500 whitespace-nowrap">
-                    {new Date(doc.created_at).toLocaleString()}
-                  </td>
-                  <td className="p-3">
-                    {(() => {
-                      const g = fiscalGroup(doc.status, doc.error_type, doc.retryable)
-                      return <Badge variant={g.variant}>{g.label}</Badge>
-                    })()}
-                  </td>
-                  <td className="p-3">
-                    {(() => {
-                      const b = attendedBadge(doc.attended)
-                      return <Badge variant={b.variant}>{b.label}</Badge>
-                    })()}
-                  </td>
-                  <td className="p-3">{doc.provider || sendModeLabel(doc.send_mode)}</td>
-                  <td className="p-3 text-right">{doc.total != null ? Number(doc.total).toFixed(2) : '—'}</td>
-                  <td className="p-3">{emailStatusLabel(doc.email_status)}</td>
-                  <td className="p-3 text-center">{doc.retry_count}</td>
-                </tr>
-              ))}
               {items.length === 0 && (
                 <tr>
-                  <td colSpan={13} className="p-8 text-center text-slate-400">
-                    Sin documentos con estos filtros
+                  <td colSpan={11} className="px-3 py-12 text-center text-slate-400">
+                    {tab === 'pending' ? 'No hay documentos pendientes de gestión con estos filtros.' : 'Sin documentos en el historial con estos filtros.'}
                   </td>
                 </tr>
               )}
+              {items.map((d) => {
+                const g = fiscalGroup(d.status, d.error_type, d.retryable)
+                const ab = attendedBadge(!!d.attended)
+                const failure = failureText(d)
+                return (
+                  <tr key={d.document_uuid} className="border-t border-slate-100 hover:bg-slate-50">
+                    <td className="px-3 py-2">
+                      <input
+                        type="checkbox"
+                        aria-label={`Seleccionar ${d.series}-${d.number}`}
+                        disabled={!!d.attended}
+                        checked={selected.has(d.document_uuid)}
+                        onChange={() => toggleSelect(d.document_uuid)}
+                      />
+                    </td>
+                    <td className="px-3 py-2 cursor-pointer" onClick={() => openDetail(d.document_uuid)}>
+                      <div className="font-medium text-slate-800">{d.tenant_slug}</div>
+                      <div className="text-xs text-slate-400">{d.company_ruc ?? ''}</div>
+                    </td>
+                    <td className="px-3 py-2">
+                      <div className="font-mono text-xs">
+                        {d.series}-{d.number}
+                      </div>
+                      <div className="text-xs text-slate-400">{docTypeLabel(d.document_type)}</div>
+                    </td>
+                    <td className="px-3 py-2 max-w-[160px] truncate">{d.customer_name || '—'}</td>
+                    <td className="px-3 py-2 whitespace-nowrap text-xs text-slate-600">{formatLima(d.created_at)}</td>
+                    <td className="px-3 py-2">
+                      <div className="flex flex-col items-start gap-1">
+                        <Badge variant={g.variant}>{g.label}</Badge>
+                        {d.attended && <Badge variant={ab.variant}>{ab.label}</Badge>}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 max-w-[220px] text-xs text-slate-500">
+                      <span className="line-clamp-2" title={failure}>
+                        {failure || '—'}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">{d.total ?? '—'}</td>
+                    <td className="px-3 py-2 text-xs">{d.customer_email ? emailStatusLabel(d.email_status) : 'Sin correo'}</td>
+                    <td className="px-3 py-2 text-right">{d.retry_count}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      <div className="flex gap-1">
+                        {!d.attended && !isNormalActionBlocked(d.status, d.error_type) && d.status !== 'accepted' && d.status !== 'observed' && (
+                          <button
+                            type="button"
+                            onClick={() => runAction(d.document_uuid, 'retry', d)}
+                            className="px-2 py-1 text-xs bg-indigo-50 text-indigo-700 rounded hover:bg-indigo-100"
+                          >
+                            Reintentar
+                          </button>
+                        )}
+                        {!d.attended && isAttendable(d.status) && (
+                          <button
+                            type="button"
+                            onClick={() => openAttendModal(d.document_uuid)}
+                            className="px-2 py-1 text-xs bg-emerald-50 text-emerald-800 rounded hover:bg-emerald-100"
+                          >
+                            Atender
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => openDetail(d.document_uuid)}
+                          className="px-2 py-1 text-xs bg-slate-100 rounded hover:bg-slate-200"
+                        >
+                          Ver
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
-        </CardBody>
-        <div className="flex items-center justify-between px-4 py-3 border-t border-slate-100">
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-t border-slate-100">
           <button
             type="button"
             onClick={prevPage}
-            disabled={loadingMore || historyIndex <= 0}
+            disabled={loadingMore || historyIndex === 0}
             className="inline-flex items-center gap-1 px-3 py-1.5 text-sm border rounded-lg disabled:opacity-40"
           >
             <ChevronLeft size={16} /> Anterior
           </button>
-          {loadingMore && <Spinner size={20} />}
+          <div className="flex items-center gap-3 text-sm text-slate-500">
+            <span>Página {historyIndex + 1}</span>
+            <label className="flex items-center gap-1.5">
+              Por página
+              <select
+                value={pageSize}
+                onChange={(e) => setPageSize(Number(e.target.value))}
+                className="border border-slate-200 rounded-lg px-2 py-1 text-sm bg-white"
+              >
+                {PAGE_SIZES.map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
           <button
             type="button"
             onClick={nextPage}
@@ -636,6 +984,57 @@ export default function FiscalDocumentsPage() {
           </button>
         </div>
       </Card>
+
+      <Modal open={bulkAsk !== null} onClose={() => !bulkLoading && setBulkAsk(null)} title="Confirmar acción en lote" maxWidth="max-w-md">
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600">
+            {bulkAsk === 'attend' ? (
+              <>
+                Se marcarán como <b>atendidos</b> <b>{selected.size}</b> documento(s) y pasarán al historial; no se podrán reenviar hasta quitarles
+                "atendido".
+              </>
+            ) : (
+              <>
+                Acción <b>{bulkAsk ? BULK_LABELS[bulkAsk] : ''}</b> sobre <b>{bulkCount}</b> documento(s)
+                {selectAllFilter && (viewTotal ?? 0) > BULK_MAX ? ` (de ${viewTotal}; el resto requiere repetir el lote)` : ''}.
+              </>
+            )}
+          </p>
+          {bulkAsk === 'force' && (
+            <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-3">
+              Forzar reenvía sin respetar las reglas normales de envío/reintento (incluye aceptados, rechazos de negocio y los que requieren acción
+              manual). Es un override administrativo.
+            </p>
+          )}
+          {bulkAsk === 'attend' && (
+            <textarea
+              rows={2}
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm resize-none"
+              placeholder="Motivo común (opcional)"
+              value={bulkReason}
+              onChange={(e) => setBulkReason(e.target.value)}
+            />
+          )}
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setBulkAsk(null)}
+              disabled={bulkLoading}
+              className="px-4 py-2 text-sm border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={runBulk}
+              disabled={bulkLoading}
+              className={`px-4 py-2 text-sm text-white rounded-lg disabled:opacity-50 ${bulkAsk === 'force' ? 'bg-amber-600 hover:bg-amber-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}
+            >
+              {bulkLoading ? 'Procesando…' : 'Confirmar'}
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       <Modal open={detailOpen} onClose={() => setDetailOpen(false)} title="Detalle fiscal" maxWidth="max-w-4xl">
         {detailLoading && (
@@ -747,38 +1146,29 @@ export default function FiscalDocumentsPage() {
                     detail.document.retryable
                   )
                   if (!explanation && !progress) return null
-                  return (
-                    <span className="text-xs text-slate-500">
-                      {[explanation, progress].filter(Boolean).join(' · ')}
-                    </span>
-                  )
+                  return <span className="text-xs text-slate-500">{[explanation, progress].filter(Boolean).join(' · ')}</span>
                 })()}
               </div>
               {detail.document.next_retry_at ? (
                 <div className="col-span-2 text-xs text-slate-500">
-                  <span className="text-slate-500">Próximo reintento automático:</span>{' '}
-                  {new Date(detail.document.next_retry_at).toLocaleString()}
+                  <span className="text-slate-500">Próximo reintento automático:</span> {formatLima(detail.document.next_retry_at)}
                 </div>
               ) : null}
               {detail.document.attended ? (
                 <div className="col-span-2 text-xs text-slate-500">
-                  <span className="text-slate-500">Atendido:</span>{' '}
-                  {detail.document.attended_at ? new Date(detail.document.attended_at).toLocaleString() : '—'}
+                  <span className="text-slate-500">Atendido:</span> {formatLima(detail.document.attended_at)}
                   {detail.document.attended_by ? ` · por ${detail.document.attended_by}` : ''}
                   {detail.document.attended_reason ? ` · "${detail.document.attended_reason}"` : ''}
                 </div>
               ) : null}
               <div className="col-span-2">
-                <span className="text-slate-500">SUNAT / PSE:</span> {detail.document.sunat_code} —{' '}
-                {detail.document.sunat_message}
+                <span className="text-slate-500">SUNAT / PSE:</span> {detail.document.sunat_code} — {detail.document.sunat_message}
               </div>
             </div>
 
             {detail.pse_response ? (
               <details open className="text-sm border border-slate-100 rounded-lg p-3 bg-amber-50/50">
-                <summary className="cursor-pointer font-semibold text-slate-700">
-                  Respuesta PSE (ValidaPSE)
-                </summary>
+                <summary className="cursor-pointer font-semibold text-slate-700">Respuesta PSE (ValidaPSE)</summary>
                 <pre className="mt-2 p-3 bg-white rounded-lg overflow-auto max-h-40 text-xs">
                   {JSON.stringify(detail.pse_response, null, 2)}
                 </pre>
@@ -790,7 +1180,7 @@ export default function FiscalDocumentsPage() {
               <div className="max-h-48 overflow-y-auto space-y-1 text-xs">
                 {detail.timeline.map((ev, i) => (
                   <div key={i} className="flex gap-2 py-1 border-b border-slate-50">
-                    <span className="text-slate-400 whitespace-nowrap">{String(ev.at)}</span>
+                    <span className="text-slate-400 whitespace-nowrap">{formatLima(String(ev.at))}</span>
                     <span className="font-medium">{String(ev.type)}</span>
                   </div>
                 ))}
@@ -805,9 +1195,7 @@ export default function FiscalDocumentsPage() {
             </details>
 
             <details className="text-xs">
-              <summary className="cursor-pointer font-semibold text-slate-700">
-                Attempts ({detail.attempts.length})
-              </summary>
+              <summary className="cursor-pointer font-semibold text-slate-700">Attempts ({detail.attempts.length})</summary>
               <pre className="mt-2 p-3 bg-slate-50 rounded-lg overflow-auto max-h-32">
                 {JSON.stringify(detail.attempts, null, 2)}
               </pre>
@@ -819,7 +1207,7 @@ export default function FiscalDocumentsPage() {
       <Modal open={attendTarget !== null} onClose={() => setAttendTarget(null)} title="Marcar como atendido" maxWidth="max-w-md">
         <div className="space-y-4">
           <p className="text-sm text-slate-600">
-            Ya no se podrá reenviar/reintentar/forzar este documento hasta quitarle "atendido". Motivo (opcional):
+            Ya no se podrá reenviar/reintentar/forzar este documento hasta quitarle "atendido", y pasará al historial. Motivo (opcional):
           </p>
           <textarea
             autoFocus

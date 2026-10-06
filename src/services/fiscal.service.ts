@@ -14,7 +14,16 @@ export interface FiscalStats {
   emails_pending: number
   by_status: Record<string, number>
   tenants: Array<{ tenant_slug: string; total: number }>
+  /** Observados/anulados SIN atender y total de atendidos (error/rechazado/observado/anulado). */
+  observed?: number
+  cancelled?: number
+  attended?: number
+  /** Conteo por pestaña respetando todos los filtros activos (menos la propia vista). */
+  views?: Partial<Record<FiscalView, number>>
 }
+
+/** Vistas de trabajo: "needs_action" excluye siempre los documentos atendidos. */
+export type FiscalView = 'pending' | 'history' | 'needs_action' | 'processing' | 'accepted' | 'attended' | 'all'
 
 export interface FiscalDocumentSummary {
   document_uuid: string
@@ -92,6 +101,8 @@ export interface FiscalFilters {
   /** Mutuamente excluyentes en la UI — separado deliberadamente de `group`/`status` (no es un estado técnico). */
   attended_only?: boolean
   unattended_only?: boolean
+  /** Pestaña de trabajo (ver FiscalView). */
+  view?: FiscalView
   limit?: number
   offset?: number
   cursor?: string
@@ -116,7 +127,8 @@ export interface FiscalBulkActionResult {
 }
 
 export const fiscalService = {
-  getStats: (filters: Pick<FiscalFilters, 'tenant_slug' | 'from' | 'to'> = {}) =>
+  /** Acepta los mismos filtros que el listado: `views` respeta tenant/fechas/filtros activos. */
+  getStats: (filters: FiscalFilters = {}) =>
     api.get<FiscalStats>(`/superadmin/fiscal/stats?${qs(filters)}`).then((r) => r.data),
 
   listDocuments: (filters: FiscalFilters = {}) =>
@@ -146,12 +158,6 @@ export const fiscalService = {
     api
       .post<FiscalBulkActionResult>(`/superadmin/fiscal/documents/bulk/${action}`, payload)
       .then((r) => r.data),
-
-  downloadUrl: (uuid: string, type: 'xml' | 'signed_xml' | 'cdr' | 'pdf' | 'unsigned_xml') => {
-    const base = api.defaults.baseURL || '/api'
-    const token = localStorage.getItem('sa_token')
-    return `${base}/superadmin/fiscal/documents/${uuid}/download/${type}?token=${encodeURIComponent(token || '')}`
-  },
 }
 
 // Descarga autenticada vía fetch + blob
