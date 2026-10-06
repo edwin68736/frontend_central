@@ -641,6 +641,24 @@ export default function FiscalDocumentsPage() {
         </div>
       )}
 
+      {stats && (
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-1 px-1 text-xs text-slate-500">
+          <span className="font-semibold uppercase tracking-wide text-slate-400">Resumen</span>
+          <span>
+            Emitidos hoy <b className="text-slate-700">{(stats.documents_today ?? 0).toLocaleString()}</b>
+          </span>
+          <span>
+            Aceptados <b className="text-emerald-700">{(stats.accepted ?? 0).toLocaleString()}</b>
+          </span>
+          <span>
+            Atendidos <b className="text-slate-700">{(stats.attended ?? 0).toLocaleString()}</b>
+          </span>
+          <span>
+            Total <b className="text-slate-700">{(stats.total ?? 0).toLocaleString()}</b>
+          </span>
+        </div>
+      )}
+
       <Card>
         <CardBody className="space-y-3">
           <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
@@ -839,7 +857,7 @@ export default function FiscalDocumentsPage() {
           </div>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className={`overflow-x-auto transition-opacity ${loading ? 'opacity-40 pointer-events-none' : ''}`}>
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-left text-xs text-slate-500">
               <tr>
