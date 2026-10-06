@@ -7,7 +7,6 @@ import {
   ChevronRight,
   Clock,
   RefreshCw,
-  Search,
   Server,
   RotateCcw,
   XCircle,
@@ -21,10 +20,10 @@ import {
   FiscalOperationsSummary,
   FiscalQueueGroup,
   FiscalQueueMonitor,
-  FiscalTenantOperation,
 } from '@/services/fiscal-operations.service'
 import { Card, CardBody, CardHeader } from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
+import TenantFiscalSummary from './TenantFiscalSummary'
 import Spinner from '@/components/ui/Spinner'
 import Modal from '@/components/ui/Modal'
 import {
@@ -33,9 +32,7 @@ import {
   fiscalExplanation,
   retryProgressLabel,
   fiscalActionErrorMessage,
-  connectionStatusLabel,
   healthStatusLabel,
-  sendModeLabel,
   queueTabLabel,
 } from '@/lib/fiscalStatus'
 
@@ -44,13 +41,6 @@ function healthVariant(s: string): 'green' | 'yellow' | 'red' | 'gray' {
   if (s === 'degraded') return 'yellow'
   if (s === 'critical') return 'red'
   return 'gray'
-}
-
-function connVariant(s: string): 'green' | 'red' | 'yellow' | 'gray' {
-  if (s === 'connected') return 'green'
-  if (s === 'testing') return 'yellow'
-  if (s === 'configuration_missing') return 'gray'
-  return 'red'
 }
 
 function KpiCard({ label, value }: { label: string; value: string | number }) {
@@ -102,23 +92,16 @@ function MiniBarChart({
   )
 }
 
-const TENANTS_PAGE_SIZE = 25
 const QUEUE_PAGE_SIZE = 25
 
 export default function OperacionesFiscalesPage() {
   const [loading, setLoading] = useState(true)
   const [health, setHealth] = useState<FiscalHealth | null>(null)
   const [summary, setSummary] = useState<FiscalOperationsSummary | null>(null)
-  const [tenants, setTenants] = useState<FiscalTenantOperation[]>([])
-  const [tenantsTotal, setTenantsTotal] = useState(0)
-  const [tenantsOffset, setTenantsOffset] = useState(0)
   const [queue, setQueue] = useState<FiscalQueueMonitor | null>(null)
   const [queueOffset, setQueueOffset] = useState(0)
   const [alerts, setAlerts] = useState<FiscalAlertItem[]>([])
   const [queueTab, setQueueTab] = useState<FiscalQueueGroup>('queued')
-  const [search, setSearch] = useState('')
-  const [errorsOnly, setErrorsOnly] = useState(false)
-  const [pendingOnly, setPendingOnly] = useState(false)
   const [timeline, setTimeline] = useState<FiscalAuditTimeline | null>(null)
   const [timelineOpen, setTimelineOpen] = useState(false)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
@@ -147,24 +130,6 @@ export default function OperacionesFiscalesPage() {
     }
   }, [])
 
-  // Fase 8: tabla de tenants paginada de verdad (antes traía los ~384 tenants habilitados de
-  // una sola vez, sin límite, y el frontend los pintaba todos como filas).
-  const loadTenants = useCallback(async () => {
-    try {
-      const data = await fiscalOperationsService.getTenants({
-        q: search || undefined,
-        errors_only: errorsOnly,
-        pending_only: pendingOnly,
-        limit: TENANTS_PAGE_SIZE,
-        offset: tenantsOffset,
-      })
-      setTenants(data.items || [])
-      setTenantsTotal(data.total ?? 0)
-    } catch {
-      toast.error('Error cargando tenants')
-    }
-  }, [search, errorsOnly, pendingOnly, tenantsOffset])
-
   // Fase 8: la cola ahora se pide UN bucket a la vez, paginado, en vez de los 4 buckets con
   // tope fijo de 50 sin forma de ver más.
   const loadQueue = useCallback(async () => {
@@ -187,12 +152,6 @@ export default function OperacionesFiscalesPage() {
   }, [loadCore])
 
   useEffect(() => {
-    loadTenants()
-    const id = setInterval(loadTenants, 30000)
-    return () => clearInterval(id)
-  }, [loadTenants])
-
-  useEffect(() => {
     loadQueue()
     const id = setInterval(loadQueue, 30000)
     return () => clearInterval(id)
@@ -200,28 +159,12 @@ export default function OperacionesFiscalesPage() {
 
   const refreshAll = () => {
     loadCore()
-    loadTenants()
     loadQueue()
   }
 
   const changeQueueTab = (tab: FiscalQueueGroup) => {
     setQueueTab(tab)
     setQueueOffset(0)
-  }
-
-  const updateSearch = (v: string) => {
-    setSearch(v)
-    setTenantsOffset(0)
-  }
-
-  const updateErrorsOnly = (v: boolean) => {
-    setErrorsOnly(v)
-    setTenantsOffset(0)
-  }
-
-  const updatePendingOnly = (v: boolean) => {
-    setPendingOnly(v)
-    setTenantsOffset(0)
   }
 
   const queueItems = queue?.items ?? []
@@ -364,97 +307,7 @@ export default function OperacionesFiscalesPage() {
         </Card>
       )}
 
-      <Card>
-        <CardHeader className="flex flex-wrap items-center gap-3">
-          <span className="font-semibold">Tenants fiscales</span>
-          <div className="flex-1 flex flex-wrap gap-2 ml-auto">
-            <div className="relative">
-              <Search size={14} className="absolute left-2 top-2 text-slate-400" />
-              <input
-                className="pl-7 pr-2 py-1.5 text-sm border rounded-lg"
-                placeholder="Buscar..."
-                value={search}
-                onChange={(e) => updateSearch(e.target.value)}
-              />
-            </div>
-            <label className="text-xs flex items-center gap-1">
-              <input type="checkbox" checked={errorsOnly} onChange={(e) => updateErrorsOnly(e.target.checked)} />
-              Solo errores
-            </label>
-            <label className="text-xs flex items-center gap-1">
-              <input type="checkbox" checked={pendingOnly} onChange={(e) => updatePendingOnly(e.target.checked)} />
-              Solo pendientes
-            </label>
-          </div>
-        </CardHeader>
-        <CardBody className="overflow-x-auto p-0">
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-slate-600">
-              <tr>
-                {['Tenant', 'RUC', 'Modo', 'Proveedor', 'Conexión', 'Pend.', 'Últ. emisión', 'Errores 24h', 'Reintentos 24h', 'Prom. ms'].map(
-                  (h) => (
-                    <th key={h} className="px-3 py-2 text-left font-medium">
-                      {h}
-                    </th>
-                  )
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {tenants.map((t) => (
-                <tr key={`${t.tenant_slug}-${t.ruc}`} className="border-t border-slate-100 hover:bg-slate-50/50">
-                  <td className="px-3 py-2 font-medium">{t.tenant_slug}</td>
-                  <td className="px-3 py-2">{t.ruc}</td>
-                  <td className="px-3 py-2">{sendModeLabel(t.send_mode)}</td>
-                  <td className="px-3 py-2">{t.provider || '—'}</td>
-                  <td className="px-3 py-2">
-                    <Badge variant={connVariant(t.connection_status)}>{connectionStatusLabel(t.connection_status)}</Badge>
-                  </td>
-                  <td className="px-3 py-2">{t.pending}</td>
-                  <td className="px-3 py-2 text-xs">
-                    {t.last_emit_at ? new Date(t.last_emit_at).toLocaleString() : '—'}
-                  </td>
-                  <td className="px-3 py-2">{t.errors_24h}</td>
-                  <td className="px-3 py-2">{t.retries_24h}</td>
-                  <td className="px-3 py-2">{t.avg_duration_ms ?? '—'}</td>
-                </tr>
-              ))}
-              {tenants.length === 0 && (
-                <tr>
-                  <td colSpan={10} className="px-3 py-6 text-center text-slate-400">
-                    Sin tenants
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </CardBody>
-        <div className="flex items-center justify-between px-4 py-3 border-t border-slate-100 text-sm">
-          <span className="text-slate-500">
-            {tenantsTotal > 0
-              ? `Mostrando ${tenantsOffset + 1}-${Math.min(tenantsOffset + TENANTS_PAGE_SIZE, tenantsTotal)} de ${tenantsTotal}`
-              : 'Sin tenants'}
-          </span>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setTenantsOffset((o) => Math.max(0, o - TENANTS_PAGE_SIZE))}
-              disabled={tenantsOffset <= 0}
-              className="inline-flex items-center gap-1 px-3 py-1.5 border rounded-lg disabled:opacity-40"
-            >
-              <ChevronLeft size={16} /> Anterior
-            </button>
-            <button
-              type="button"
-              onClick={() => setTenantsOffset((o) => o + TENANTS_PAGE_SIZE)}
-              disabled={tenantsOffset + TENANTS_PAGE_SIZE >= tenantsTotal}
-              className="inline-flex items-center gap-1 px-3 py-1.5 border rounded-lg disabled:opacity-40"
-            >
-              Siguiente <ChevronRight size={16} />
-            </button>
-          </div>
-        </div>
-      </Card>
+      <TenantFiscalSummary />
 
       <Card>
         <CardHeader className="flex items-center gap-2">

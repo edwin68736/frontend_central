@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
   getHealth: vi.fn(),
   getSummary: vi.fn(),
   getTenants: vi.fn(),
+  getTenantSummary: vi.fn(),
+  refreshTenantSummary: vi.fn(),
   getQueue: vi.fn(),
   getAlerts: vi.fn(),
   getAuditTimeline: vi.fn(),
@@ -222,37 +224,6 @@ describe('OperacionesFiscalesPage — Fase 8 (paginación)', () => {
       counts: { queued: 0, processing: 0, failed: 0, retrying: 0 },
       redis: { emit_queue: 0, retry_scheduled: 0 },
     })
-  })
-
-  it('la tabla de tenants muestra "Mostrando X-Y de Z" y pide la página siguiente con el offset correcto', async () => {
-    mocks.getTenants.mockResolvedValue({
-      items: [{ tenant_id: 1, tenant_slug: 'demo', empresa: 'demo', ruc: '20000000001', send_mode: 'pse', provider: null, connection_status: 'connected', connection_error: null, pending: 0, last_emit_at: null, last_error: null, retries_24h: 0, errors_24h: 0, avg_duration_ms: null }],
-      total: 60,
-      limit: 25,
-      offset: 0,
-    })
-
-    const user = userEvent.setup()
-    render(<OperacionesFiscalesPage />)
-
-    await waitFor(() => expect(screen.getByText('Mostrando 1-25 de 60')).toBeInTheDocument())
-
-    const tenantButtons = screen.getAllByRole('button', { name: /^siguiente/i })
-    await user.click(tenantButtons[0])
-
-    await waitFor(() =>
-      expect(mocks.getTenants).toHaveBeenCalledWith(expect.objectContaining({ offset: 25, limit: 25 }))
-    )
-  })
-
-  it('"Anterior" en tenants está deshabilitado en la primera página', async () => {
-    mocks.getTenants.mockResolvedValue({ items: [], total: 5, limit: 25, offset: 0 })
-
-    render(<OperacionesFiscalesPage />)
-    await waitFor(() => expect(screen.getByText('Mostrando 1-5 de 5')).toBeInTheDocument())
-
-    const anteriorButtons = screen.getAllByRole('button', { name: /^anterior/i })
-    expect(anteriorButtons[0]).toBeDisabled()
   })
 
   it('cambiar de pestaña en la cola reinicia el offset a 0 y vuelve a pedir con el group nuevo', async () => {

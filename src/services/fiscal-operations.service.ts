@@ -125,7 +125,81 @@ const qs = (params: Record<string, string | number | boolean | undefined>) => {
   return p.toString()
 }
 
+/** Resumen fiscal por tenant que vive en la BD central (se refresca cada ~15 min desde las BD de los tenants). */
+export interface TenantFiscalSummaryRow {
+  tenant_id: number
+  name: string
+  slug: string
+  ruc: string
+  tenant_status: string
+  emitted: number
+  accepted: number
+  pending: number
+  sent: number
+  error: number
+  rejected: number
+  /** Falta enviar a SUNAT: pending + error. */
+  to_send: number
+  by_type: Record<string, { emitted: number; to_send: number }>
+  /** Estado actual del tenant, sin importar el rango de fechas. */
+  open_to_send: number
+  oldest_open_at: string | null
+  last_issue_at: string | null
+  scanned_at: string | null
+  scan_error?: string
+}
+
+export interface TenantFiscalSummaryTotals {
+  tenants: number
+  emitted: number
+  accepted: number
+  pending: number
+  sent: number
+  error: number
+  rejected: number
+  to_send: number
+  with_to_send: number
+  scan_errors: number
+}
+
+export interface TenantFiscalSummaryResponse {
+  items: TenantFiscalSummaryRow[]
+  total: number
+  page: number
+  per_page: number
+  totals: TenantFiscalSummaryTotals
+  oldest_scan: string | null
+}
+
+export interface TenantFiscalSummaryParams {
+  from?: string
+  to?: string
+  /** Códigos separados por coma: 01,03,07,08,09,31. */
+  doc_type?: string
+  ruc?: string
+  q?: string
+  only_pending?: boolean
+  sort?: 'to_send' | 'emitted' | 'accepted' | 'name' | 'oldest' | 'scanned'
+  page?: number
+  per_page?: number
+}
+
 export const fiscalOperationsService = {
+  getTenantSummary: (params: TenantFiscalSummaryParams = {}) => {
+    const p = new URLSearchParams()
+    Object.entries(params).forEach(([k, v]) => {
+      if (v === undefined || v === null || v === '' || v === false) return
+      p.set(k, String(v))
+    })
+    return api
+      .get<TenantFiscalSummaryResponse>(`/superadmin/fiscal/tenant-summary?${p.toString()}`)
+      .then((r) => r.data)
+  },
+
+  /** "Verificar ahora": reescanea un tenant sin esperar al job periódico. */
+  refreshTenantSummary: (tenantId: number) =>
+    api.post<{ ok: boolean }>(`/superadmin/fiscal/tenant-summary/${tenantId}/refresh`).then((r) => r.data),
+
   getHealth: () => api.get<FiscalHealth>('/superadmin/fiscal/health').then((r) => r.data),
 
   getSummary: () =>

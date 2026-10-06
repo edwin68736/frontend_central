@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   RefreshCw,
   AlertTriangle,
-  CheckCircle2,
   Clock,
   Mail,
   Download,
@@ -235,7 +234,11 @@ export default function FiscalDocumentsPage() {
   const [items, setItems] = useState<FiscalDocumentSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
-  const [filters, setFilters] = useState<SavedFilters>(() => loadSavedFilters())
+  // Un enlace desde Operaciones (?tenant=slug) abre la vista limpia, solo con ese tenant.
+  const [filters, setFilters] = useState<SavedFilters>(() => {
+    const tenant = new URLSearchParams(window.location.search).get('tenant')
+    return tenant ? { tenant_slug: tenant } : loadSavedFilters()
+  })
   const [searchText, setSearchText] = useState('')
   const [tab, setTab] = useState<Tab>('pending')
   const [pendingSub, setPendingSub] = useState<FiscalView>('pending')
@@ -268,7 +271,11 @@ export default function FiscalDocumentsPage() {
     const id = setTimeout(() => {
       const parsed = parseSearchQuery(searchText)
       setFilters((f) => {
-        const { series: _s, number: _n, company_ruc: _r, customer_name: _c, ...rest } = f
+        const rest: SavedFilters = { ...f }
+        delete rest.series
+        delete rest.number
+        delete rest.company_ruc
+        delete rest.customer_name
         const next = { ...rest, ...parsed }
         return JSON.stringify(next) === JSON.stringify(f) ? f : next
       })
@@ -385,7 +392,9 @@ export default function FiscalDocumentsPage() {
   const setRange = (from?: string, to?: string) => {
     const r = normalizeRange(from, to)
     setFilters((f) => {
-      const { from: _f, to: _t, ...rest } = f
+      const rest: SavedFilters = { ...f }
+      delete rest.from
+      delete rest.to
       return { ...rest, ...(r.from ? { from: r.from } : {}), ...(r.to ? { to: r.to } : {}) }
     })
   }
