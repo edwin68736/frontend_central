@@ -642,20 +642,21 @@ export default function FiscalDocumentsPage() {
       )}
 
       {stats && (
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-1 px-1 text-xs text-slate-500">
-          <span className="font-semibold uppercase tracking-wide text-slate-400">Resumen</span>
-          <span>
-            Emitidos hoy <b className="text-slate-700">{(stats.documents_today ?? 0).toLocaleString()}</b>
-          </span>
-          <span>
-            Aceptados <b className="text-emerald-700">{(stats.accepted ?? 0).toLocaleString()}</b>
-          </span>
-          <span>
-            Atendidos <b className="text-slate-700">{(stats.attended ?? 0).toLocaleString()}</b>
-          </span>
-          <span>
-            Total <b className="text-slate-700">{(stats.total ?? 0).toLocaleString()}</b>
-          </span>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          {[
+            { label: 'Emitidos hoy', value: stats.documents_today, tone: 'text-indigo-700', bar: 'bg-indigo-500' },
+            { label: 'Aceptados', value: stats.accepted, tone: 'text-emerald-700', bar: 'bg-emerald-500' },
+            { label: 'Atendidos', value: stats.attended, tone: 'text-slate-700', bar: 'bg-slate-400' },
+            { label: 'Total de documentos', value: stats.total, tone: 'text-slate-700', bar: 'bg-sky-500' },
+          ].map((c) => (
+            <div key={c.label} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+              <span className={`w-1.5 self-stretch rounded-full ${c.bar}`} />
+              <div>
+                <p className={`text-xl font-bold leading-tight ${c.tone}`}>{(c.value ?? 0).toLocaleString()}</p>
+                <p className="text-xs text-slate-500">{c.label}</p>
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
