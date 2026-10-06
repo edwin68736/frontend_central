@@ -1,9 +1,10 @@
 name: Deploy Frontend Central
 
+# Solo manual (GitHub → Actions → "Deploy Frontend Central" → Run workflow), igual que el backend:
+# un push a main NO despliega. Así el panel se publica después de que el facturador y el backend
+# ya respondan lo nuevo.
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
 
 jobs:
   deploy:
