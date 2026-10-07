@@ -9,7 +9,8 @@ import {
 } from '@/services/equiposOrders.service'
 import { apiError, BTN_PRIMARY, BTN_SECONDARY, formatDateTime, INPUT } from './common'
 import { AlertBadge, fmtDate, money, PaymentBadge, ShipmentBadge, StatusBadge, ValidationBadge } from './ordersCommon'
-import { buildShippingLabel, openLabel, type LabelFormat } from './shippingLabel'
+import { buildShippingLabel, openLabel } from './shippingLabel'
+import { useConfirm, type ConfirmOptions, type ConfirmResult } from './ConfirmProvider'
 import PaymentModal from './PaymentModal'
 import { equiposControl } from '@/services/equiposControl.service'
 import { waLink, waText, WA_LABEL, type WaKind } from './whatsapp'
@@ -21,18 +22,15 @@ interface Props {
   onEdit: (id: number) => void
 }
 
-type Prompt = { title: string; label: string; required: boolean; confirmLabel: string; run: (text: string) => Promise<void> } | null
 
 export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Props) {
   const { hasPermission } = useAuth()
   const [o, setO] = useState<OrderView | null>(null)
   const [busy, setBusy] = useState(false)
   const [payOpen, setPayOpen] = useState(false)
-  const [prompt, setPrompt] = useState<Prompt>(null)
-  const [promptText, setPromptText] = useState('')
+  const confirm = useConfirm()
   const [retOpen, setRetOpen] = useState(false)
   const [ret, setRet] = useState({ cost: '0', condition: 'buen_estado' as 'buen_estado' | 'danado', notes: '' })
-  const [labelFormat, setLabelFormat] = useState<LabelFormat>('thermal')
 
   const can = (p: string) => hasPermission(p)
 
@@ -68,11 +66,15 @@ export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Pro
     }
   }
 
-  const ask = (p: NonNullable<Prompt>) => { setPromptText(''); setPrompt(p) }
+  /** Pide confirmación (y PIN / motivo si corresponde) antes de ejecutar la acción. */
+  const guard = async (opt: ConfirmOptions, fn: (r: ConfirmResult) => Promise<{ order: OrderView; warnings: string[] }>, ok: string) => {
+    const r = await confirm(opt)
+    if (r) await act(() => fn(r), ok)
+  }
 
   const printLabel = async () => {
     if (!o) return
-    const blob = buildShippingLabel(o, labelFormat)
+    const blob = buildShippingLabel(o)
     if (!openLabel(blob)) toast.error('El navegador bloqueó la ventana del rótulo; permite las ventanas emergentes')
     try { await equiposOrders.labelPrinted(o.id); void load(); onChanged() } catch { /* no crítico */ }
   }
@@ -222,33 +224,30 @@ export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Pro
                 <button type="button" className={BTN_SECONDARY} onClick={() => onEdit(o.id)}><Pencil size={13} /> Editar</button>
               )}
               {o.status === 'borrador' && can('equipos.create') && (
-                <button type="button" className={BTN_PRIMARY} disabled={busy} onClick={() => void act(() => equiposOrders.confirmOrder(o.id), 'Pedido confirmado')}><CheckCircle2 size={15} /> Confirmar pedido</button>
+                <button type="button" className={BTN_PRIMARY} disabled={busy} onClick={() => void guard({ title: 'Confirmar pedido', message: `Se confirmará el pedido N° ${o.order_number} por ${money(o.total_amount)} y se descontará el stock.`, confirmLabel: 'Confirmar pedido' }, () => equiposOrders.confirmOrder(o.id), 'Pedido confirmado')}><CheckCircle2 size={15} /> Confirmar pedido</button>
               )}
               {o.status === 'registrado' && can('equipos.validate') && o.validation_status !== 'validado' && (
-                <button type="button" className={BTN_PRIMARY} disabled={busy} onClick={() => void act(() => equiposOrders.validateOrder(o.id), 'Pedido validado')}><CheckCircle2 size={15} /> Validar datos</button>
+                <button type="button" className={BTN_PRIMARY} disabled={busy} onClick={() => void guard({ title: 'Validar pedido', message: 'Confirmas que los datos del cliente, los productos y el destino están correctos. Después podrá despacharse.', confirmLabel: 'Validar' }, () => equiposOrders.validateOrder(o.id), 'Pedido validado')}><CheckCircle2 size={15} /> Validar datos</button>
               )}
               {o.status === 'registrado' && can('equipos.validate') && (
-                <button type="button" className={BTN_SECONDARY} disabled={busy} onClick={() => ask({ title: 'Observar pedido', label: '¿Qué hay que corregir?', required: true, confirmLabel: 'Observar', run: async (t) => act(() => equiposOrders.observeOrder(o.id, t), 'Pedido observado') })}>Observar</button>
+                <button type="button" className={BTN_SECONDARY} disabled={busy} onClick={() => void guard({ title: 'Observar pedido', input: { label: '¿Qué hay que corregir?', required: true }, confirmLabel: 'Observar' }, (r) => equiposOrders.observeOrder(o.id, r.text), 'Pedido observado')}>Observar</button>
               )}
               {o.status === 'registrado' && sh?.status === 'pendiente_envio' && can('equipos.shipments') && (
-                <button type="button" className={BTN_PRIMARY} disabled={busy || o.validation_status !== 'validado'} title={o.validation_status !== 'validado' ? 'Primero valida los datos del pedido' : ''} onClick={() => void act(() => equiposOrders.dispatch(o.id), 'Pedido despachado')}><Truck size={15} /> Despachar</button>
+                <button type="button" className={BTN_PRIMARY} disabled={busy || o.validation_status !== 'validado'} title={o.validation_status !== 'validado' ? 'Primero valida los datos del pedido' : ''} onClick={() => void guard({ title: 'Despachar pedido', message: `El pedido N° ${o.order_number} saldrá por ${sh?.carrier_name || 'el transportista'} con la guía ${sh?.guide_number || 's/n'}.`, confirmLabel: 'Despachar' }, () => equiposOrders.dispatch(o.id), 'Pedido despachado')}><Truck size={15} /> Despachar</button>
               )}
               {sh?.status === 'en_transito' && can('equipos.shipments') && (
-                <button type="button" className={BTN_PRIMARY} disabled={busy} onClick={() => void act(() => equiposOrders.arrived(o.id), 'Llegada registrada')}>Marcar llegada a agencia</button>
+                <button type="button" className={BTN_PRIMARY} disabled={busy} onClick={() => void guard({ title: 'Registrar llegada', message: 'El paquete llegó a la agencia de destino. Desde hoy corre el plazo de recojo.', confirmLabel: 'Registrar llegada' }, () => equiposOrders.arrived(o.id), 'Llegada registrada')}>Marcar llegada a agencia</button>
               )}
               {(sh?.status === 'en_agencia' || sh?.status === 'en_transito') && can('equipos.shipments') && (
-                <button type="button" className={BTN_SECONDARY} disabled={busy} onClick={() => void act(() => equiposOrders.pickedUp(o.id), 'Recojo registrado')}>Cliente recogió</button>
+                <button type="button" className={BTN_SECONDARY} disabled={busy} onClick={() => void guard({ title: 'Cliente recogió', message: o.balance_amount > 0 ? `El cliente aún debe ${money(o.balance_amount)}. Se registrará el recojo igualmente.` : 'Se registrará que el cliente recogió el paquete.', confirmLabel: 'Registrar recojo' }, () => equiposOrders.pickedUp(o.id), 'Recojo registrado')}>Cliente recogió</button>
               )}
               {o.status === 'registrado' && can('equipos.payments') && o.payment_status !== 'pagado' && (
-                <button type="button" className={BTN_SECONDARY} disabled={busy} onClick={() => void act(() => equiposOrders.setNoPayment(o.id, o.payment_status !== 'no_pago'), o.payment_status === 'no_pago' ? 'Marca de sin pago quitada' : 'Marcado sin pago (obsequio/cortesía)')}>
+                <button type="button" className={BTN_SECONDARY} disabled={busy} onClick={() => void guard({ title: o.payment_status === 'no_pago' ? 'Quitar «sin pago»' : 'Marcar sin pago', message: 'Cambia si este pedido se cobra. Requiere tu PIN.', pin: true, confirmLabel: 'Confirmar' }, (r) => equiposOrders.setNoPayment(o.id, o.payment_status !== 'no_pago', r.pin), o.payment_status === 'no_pago' ? 'Marca de sin pago quitada' : 'Marcado sin pago (obsequio/cortesía)')}>
                   {o.payment_status === 'no_pago' ? 'Quitar «sin pago»' : 'Marcar sin pago'}
                 </button>
               )}
               {sh && o.status === 'registrado' && can('equipos.shipments') && (
                 <span className="inline-flex items-center gap-1">
-                  <select aria-label="Formato del rótulo" value={labelFormat} onChange={(e) => setLabelFormat(e.target.value as LabelFormat)} className="border border-slate-300 rounded-lg px-2 py-1.5 text-xs bg-white">
-                    <option value="thermal">Térmico 100×150</option><option value="a4">A4 (2 por hoja)</option>
-                  </select>
                   <button type="button" className={BTN_SECONDARY} onClick={() => void printLabel()}><Printer size={13} /> Rótulo{sh.label_printed_at ? ' (reimprimir)' : ''}</button>
                 </span>
               )}
@@ -261,7 +260,7 @@ export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Pro
               })}
               {isOpen && can('equipos.cancel') && (
                 <button type="button" className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-red-700 bg-red-50 hover:bg-red-100" disabled={busy}
-                  onClick={() => ask({ title: 'Anular pedido', label: 'Motivo de la anulación', required: true, confirmLabel: 'Anular pedido', run: async (t) => act(() => equiposOrders.cancelOrder(o.id, t), 'Pedido anulado') })}>
+                  onClick={() => void guard({ title: 'Anular pedido', message: 'Se devolverá el stock descontado. No se puede deshacer.', danger: true, pin: true, input: { label: 'Motivo de la anulación', required: true }, confirmLabel: 'Anular pedido' }, (r) => equiposOrders.cancelOrder(o.id, r.text, r.pin), 'Pedido anulado')}>
                   <Ban size={13} /> Anular
                 </button>
               )}
@@ -287,21 +286,6 @@ export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Pro
         </div>
       </Modal>
 
-      <Modal open={prompt != null} onClose={() => setPrompt(null)} title={prompt?.title ?? ''}>
-        <div className="space-y-3">
-          <label className="block text-sm font-medium text-slate-700">{prompt?.label}</label>
-          <textarea value={promptText} onChange={(e) => setPromptText(e.target.value)} rows={3} className={INPUT} autoFocus />
-          <div className="flex justify-end gap-2">
-            <button type="button" className={BTN_SECONDARY} onClick={() => setPrompt(null)}>Cancelar</button>
-            <button type="button" className={BTN_PRIMARY} onClick={() => {
-              if (prompt?.required && !promptText.trim()) return toast.error('Este dato es obligatorio')
-              const run = prompt!.run
-              setPrompt(null)
-              void run(promptText.trim())
-            }}>{prompt?.confirmLabel}</button>
-          </div>
-        </div>
-      </Modal>
     </>
   )
 }

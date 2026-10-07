@@ -3,10 +3,13 @@ import { toast } from 'sonner'
 import { RotateCcw } from 'lucide-react'
 import Modal from '@/components/ui/Modal'
 import Spinner from '@/components/ui/Spinner'
+import PaginationBar from '@/components/ui/PaginationBar'
 import { useAuth } from '@/contexts/AuthContext'
 import { CONDITION_LABEL, equiposControl, RETURN_STATUS_LABEL, type EquipReturnView } from '@/services/equiposControl.service'
 import { apiError, BTN_PRIMARY, BTN_SECONDARY, INPUT, LABEL } from './common'
 import OrderDetail from './OrderDetail'
+import { useConfirm } from './ConfirmProvider'
+import { usePaging } from './hooks'
 import { fmtDate, money, SELECT, toDateInput, todayISO } from './ordersCommon'
 
 const FILTERS = [
@@ -28,6 +31,8 @@ export default function ReturnsTab() {
   const [f, setF] = useState({ status: '', condition: 'buen_estado', cost: '0', unpaid: '0', received: '', notes: '' })
   const [saving, setSaving] = useState(false)
   const [detailId, setDetailId] = useState<number | null>(null)
+  const confirm = useConfirm()
+  const paging = usePaging(rows)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -50,6 +55,9 @@ export default function ReturnsTab() {
 
   const save = async () => {
     if (!edit) return
+    const closing = f.status === 'recibido' && edit.status !== 'recibido'
+    const ok = await confirm({ title: 'Guardar retorno', message: closing ? (f.condition === 'buen_estado' ? 'Al marcarlo como recibido en buen estado, los equipos vuelven al stock. No se podrá deshacer.' : 'Se cerrará el retorno como recibido en mal estado; no vuelve al stock.') : 'Se actualizarán los datos del retorno.', confirmLabel: 'Guardar' })
+    if (!ok) return
     setSaving(true)
     try {
       await equiposControl.updateReturn(edit.id, {
@@ -67,6 +75,7 @@ export default function ReturnsTab() {
   }
 
   const reship = async (r: EquipReturnView) => {
+    if (!(await confirm({ title: 'Reenviar pedido', message: `Se creará un nuevo envío para el pedido N° ${r.order_number} y se descontará otra vez el stock de ${r.items_text}.`, confirmLabel: 'Reenviar' }))) return
     try {
       await equiposControl.reship(r.id)
       toast.success('Se creó un nuevo envío para el pedido (queda por despachar) y el stock se descontó')
@@ -90,7 +99,7 @@ export default function ReturnsTab() {
           <table className="w-full text-sm">
             <thead><tr className="text-left text-xs text-slate-500 border-b border-slate-200 bg-slate-50"><th className="px-3 py-2">N°</th><th className="px-3">Pedido</th><th className="px-3">Cliente</th><th className="px-3">Equipos</th><th className="px-3">Solicitado</th><th className="px-3 text-right">Saldo no cobrado</th><th className="px-3 text-right">Costo</th><th className="px-3">Estado</th><th /></tr></thead>
             <tbody className="divide-y divide-slate-100">
-              {rows.map((r) => (
+              {paging.rows.map((r) => (
                 <tr key={r.id}>
                   <td className="px-3 py-2 font-medium">{r.return_number}</td>
                   <td className="px-3">{r.order_id ? <button type="button" className="text-indigo-600 hover:underline" onClick={() => setDetailId(r.order_id)}>N° {r.order_number}</button> : '—'}</td>
@@ -113,6 +122,8 @@ export default function ReturnsTab() {
           </table>
         )}
       </div>
+
+      {!loading && rows.length > 0 && <PaginationBar {...paging.barProps} itemLabel="retornos" />}
 
       <Modal open={edit != null} onClose={() => setEdit(null)} title={edit ? `Retorno N° ${edit.return_number}` : ''}>
         {edit && (

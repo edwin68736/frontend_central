@@ -3,6 +3,9 @@ import { toast } from 'sonner'
 import { AlertTriangle, CheckCircle2, FileSpreadsheet, Info, Upload, XCircle } from 'lucide-react'
 import { readXlsx } from 'hucre'
 import Spinner from '@/components/ui/Spinner'
+import PaginationBar from '@/components/ui/PaginationBar'
+import { useConfirm } from './ConfirmProvider'
+import { usePaging } from './hooks'
 import {
   equiposService,
   type ImportBatch,
@@ -92,6 +95,7 @@ export default function ImportTab() {
   const [busy, setBusy] = useState<'' | 'leer' | 'importar'>('')
   const [sevFilter, setSevFilter] = useState<'' | ImportIssue['severity']>('')
   const [batches, setBatches] = useState<ImportBatch[]>([])
+  const confirm = useConfirm()
   const [done, setDone] = useState<ImportBatch | null>(null)
 
   const loadBatches = useCallback(() => {
@@ -123,7 +127,7 @@ export default function ImportTab() {
 
   const commit = async () => {
     if (!payload || !preview?.can_commit) return
-    if (!window.confirm(`Se importará el período ${preview.period}: ${preview.counts.orders} pedidos, ${preview.counts.payments} cobros y ${preview.counts.movements} movimientos de stock. ¿Continuar?`)) return
+    if (!(await confirm({ title: `Importar ${preview.period}`, message: `Se importarán ${preview.counts.orders} pedidos, ${preview.counts.payments} cobros y ${preview.counts.movements} movimientos de stock. La importación es definitiva para este mes.`, confirmLabel: 'Importar' }))) return
     setBusy('importar')
     try {
       const r = await equiposService.importCommit(payload)
@@ -140,6 +144,8 @@ export default function ImportTab() {
   }
 
   const shown = (preview?.issues ?? []).filter((i) => !sevFilter || i.severity === sevFilter)
+  const issuesP = usePaging(shown, 25)
+  const batchesP = usePaging(batches, 10)
   const mismatches = preview?.reconciliation.filter((r) => !r.match) ?? []
 
   return (
@@ -234,7 +240,7 @@ export default function ImportTab() {
               ))}
             </div>
             <ul className="divide-y divide-slate-100 max-h-[420px] overflow-y-auto">
-              {shown.map((i, idx) => (
+              {issuesP.rows.map((i, idx) => (
                 <li key={idx} className={`flex gap-2 px-4 py-2 text-sm border-l-4 ${SEVERITY_STYLE[i.severity]}`}>
                   <SeverityIcon s={i.severity} />
                   <span className="flex-1">{i.message}</span>
@@ -243,6 +249,7 @@ export default function ImportTab() {
               ))}
               {shown.length === 0 && <li className="px-4 py-8 text-center text-slate-400 text-sm">Sin hallazgos en esta categoría.</li>}
             </ul>
+            {shown.length > 0 && <PaginationBar {...issuesP.barProps} itemLabel="hallazgos" />}
             {preview.issues_truncated && <p className="px-4 py-2 text-xs text-slate-400">Se muestran los primeros hallazgos (los errores van primero).</p>}
           </section>
         </>
@@ -255,7 +262,7 @@ export default function ImportTab() {
             <tr><th className="px-4 py-2 text-left">Período</th><th className="px-4 py-2 text-left">Archivo</th><th className="px-4 py-2 text-right">Pedidos</th><th className="px-4 py-2 text-right">Cobros</th><th className="px-4 py-2 text-right">Movimientos</th><th className="px-4 py-2 text-left">Fecha</th></tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {batches.map((b) => (
+            {batchesP.rows.map((b) => (
               <tr key={b.id}>
                 <td className="px-4 py-2 font-medium">{b.period}</td>
                 <td className="px-4 py-2 text-slate-500">{b.file_name}</td>
@@ -268,6 +275,7 @@ export default function ImportTab() {
             {batches.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-400">Aún no se importó ningún mes.</td></tr>}
           </tbody>
         </table>
+        {batches.length > 0 && <PaginationBar {...batchesP.barProps} itemLabel="meses" />}
       </section>
     </div>
   )

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { ChevronLeft, ChevronRight, Plus, Search } from 'lucide-react'
+import { Plus, Printer, Search } from 'lucide-react'
+import PaginationBar from '@/components/ui/PaginationBar'
+import type { PerPageOption } from '@/services/pagination'
 import Spinner from '@/components/ui/Spinner'
 import { useAuth } from '@/contexts/AuthContext'
 import {
@@ -8,10 +10,10 @@ import {
 } from '@/services/equiposOrders.service'
 import { apiError, BTN_PRIMARY, INPUT } from './common'
 import OrderDetail from './OrderDetail'
+import { useDebounced } from './hooks'
+import { printLabelsFor } from './printLabels'
 import OrderEditor from './OrderEditor'
 import { fmtDate, money, PaymentBadge, SELECT, ShipmentBadge, StatusBadge, ValidationBadge } from './ordersCommon'
-
-const PER_PAGE = 25
 
 export default function OrdersTab() {
   const { hasPermission } = useAuth()
@@ -20,6 +22,11 @@ export default function OrdersTab() {
   const [filter, setFilter] = useState<OrderFilter>({})
   const [q, setQ] = useState('')
   const [page, setPage] = useState(1)
+  const [perPage, setPerPage] = useState<PerPageOption>(25)
+  const [selected, setSelected] = useState<Set<number>>(new Set())
+  const [printing, setPrinting] = useState(false)
+  const dq = useDebounced(q, 450)
+  const canShip = hasPermission('equipos.shipments')
   const [data, setData] = useState<OrderListResult | null>(null)
   const [loading, setLoading] = useState(true)
   const [detailId, setDetailId] = useState<number | null>(null)
@@ -28,21 +35,26 @@ export default function OrdersTab() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      setData(await equiposOrders.listOrders({ ...filter, q: q.trim() || undefined, page, per_page: PER_PAGE }))
+      setData(await equiposOrders.listOrders({ ...filter, q: dq.trim() || undefined, page, per_page: perPage }))
     } catch (e) {
       toast.error(apiError(e, 'No se pudieron cargar los pedidos'))
     } finally {
       setLoading(false)
     }
-  }, [filter, q, page])
+  }, [filter, dq, page, perPage])
 
-  useEffect(() => {
-    const t = setTimeout(() => void load(), 200)
-    return () => clearTimeout(t)
-  }, [load])
+  useEffect(() => { void load() }, [load])
 
   const setF = (patch: Partial<OrderFilter>) => { setPage(1); setFilter((f) => ({ ...f, ...patch })) }
-  const pages = data ? Math.max(1, Math.ceil(data.total / PER_PAGE)) : 1
+  const pages = data ? Math.max(1, Math.ceil(data.total / perPage)) : 1
+  const pageIds = (data?.rows ?? []).filter((r) => r.status === 'registrado').map((r) => r.id)
+  const allOnPage = pageIds.length > 0 && pageIds.every((id) => selected.has(id))
+  const toggle = (id: number) => setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n })
+  const togglePage = () => setSelected((s) => { const n = new Set(s); if (allOnPage) pageIds.forEach((id) => n.delete(id)); else pageIds.forEach((id) => n.add(id)); return n })
+  const printSelected = async () => {
+    setPrinting(true)
+    try { if (await printLabelsFor([...selected])) setSelected(new Set()) } catch (e) { toast.error(apiError(e, 'No se pudieron generar los rótulos')) } finally { setPrinting(false) }
+  }
 
   return (
     <div className="space-y-4">
@@ -69,6 +81,7 @@ export default function OrdersTab() {
         </select>
         <input type="date" aria-label="Desde" value={filter.from ?? ''} onChange={(e) => setF({ from: e.target.value || undefined })} className={SELECT} />
         <input type="date" aria-label="Hasta" value={filter.to ?? ''} onChange={(e) => setF({ to: e.target.value || undefined })} className={SELECT} />
+        {canShip && selected.size > 0 && <button type="button" className={BTN_PRIMARY} disabled={printing} onClick={() => void printSelected()}><Printer size={16} /> {printing ? 'Generando…' : `Imprimir rótulos (${selected.size})`}</button>}
         {canCreate && <button type="button" className={BTN_PRIMARY} onClick={() => setEditor({ open: true })}><Plus size={16} /> Nuevo pedido</button>}
       </div>
 
@@ -90,7 +103,7 @@ export default function OrdersTab() {
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs text-slate-500 border-b border-slate-200 bg-slate-50">
-                <th className="px-3 py-2">N°</th><th className="px-3">Fecha</th><th className="px-3">Cliente</th><th className="px-3">Detalle</th>
+                {canShip && <th className="px-3 py-2 w-8"><input type="checkbox" aria-label="Seleccionar la página" checked={allOnPage} onChange={togglePage} className="rounded" /></th>}<th className="px-3 py-2">N°</th><th className="px-3">Fecha</th><th className="px-3">Cliente</th><th className="px-3">Detalle</th>
                 {canSeeMoney && <th className="px-3 text-right">Total</th>}{canSeeMoney && <th className="px-3 text-right">Saldo</th>}
                 <th className="px-3">Estado</th><th className="px-3">Pago</th><th className="px-3">Envío</th>
               </tr>
@@ -98,6 +111,7 @@ export default function OrdersTab() {
             <tbody className="divide-y divide-slate-100">
               {(data?.rows ?? []).map((r) => (
                 <tr key={r.id} onClick={() => setDetailId(r.id)} className={`cursor-pointer hover:bg-slate-50 ${r.status === 'anulado' ? 'opacity-50' : ''}`}>
+                  {canShip && <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>{r.status === 'registrado' && <input type="checkbox" aria-label={`Seleccionar pedido ${r.order_number}`} checked={selected.has(r.id)} onChange={() => toggle(r.id)} className="rounded" />}</td>}
                   <td className="px-3 py-2 font-semibold text-slate-800">{r.order_number}</td>
                   <td className="px-3 whitespace-nowrap text-slate-600">{fmtDate(r.order_date)}</td>
                   <td className="px-3"><span className="text-slate-800">{r.customer_name}</span><span className="block text-xs text-slate-400">{r.customer_doc_type} {r.customer_doc_number}{r.department ? ` · ${r.department}` : ''}</span></td>
@@ -110,20 +124,14 @@ export default function OrdersTab() {
                 </tr>
               ))}
               {data && data.rows.length === 0 && (
-                <tr><td colSpan={9} className="text-center text-slate-400 py-12">No hay pedidos con esos filtros.</td></tr>
+                <tr><td colSpan={10} className="text-center text-slate-400 py-12">No hay pedidos con esos filtros.</td></tr>
               )}
             </tbody>
           </table>
         )}
       </div>
 
-      {pages > 1 && (
-        <div className="flex items-center justify-end gap-3 text-sm text-slate-600">
-          <button type="button" aria-label="Página anterior" disabled={page <= 1} onClick={() => setPage((p) => p - 1)} className="p-1.5 rounded-lg hover:bg-slate-100 disabled:opacity-40"><ChevronLeft size={16} /></button>
-          Página {page} de {pages}
-          <button type="button" aria-label="Página siguiente" disabled={page >= pages} onClick={() => setPage((p) => p + 1)} className="p-1.5 rounded-lg hover:bg-slate-100 disabled:opacity-40"><ChevronRight size={16} /></button>
-        </div>
-      )}
+      {data && <PaginationBar page={page} perPage={perPage} total={data.total} totalPages={pages} onPageChange={setPage} onPerPageChange={(n) => { setPerPage(n); setPage(1) }} itemLabel="pedidos" />}
 
       <OrderDetail
         orderId={detailId} onClose={() => setDetailId(null)} onChanged={() => void load()}

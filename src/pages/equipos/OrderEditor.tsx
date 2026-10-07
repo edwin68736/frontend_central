@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { AlertTriangle, Plus, Search, Trash2 } from 'lucide-react'
 import Modal from '@/components/ui/Modal'
 import Spinner from '@/components/ui/Spinner'
+import SearchSelect from '@/components/ui/SearchSelect'
 import {
   equiposService, type EquipCarrier, type EquipCombo, type EquipProduct,
 } from '@/services/equipos.service'
@@ -12,6 +13,8 @@ import {
 } from '@/services/equiposOrders.service'
 import { apiError, BTN_PRIMARY, BTN_SECONDARY, INPUT, LABEL } from './common'
 import { money, toDateInput, todayISO } from './ordersCommon'
+import { useDebounced } from './hooks'
+import { useConfirm } from './ConfirmProvider'
 
 const DEPARTMENTS = ['Amazonas', 'Áncash', 'Apurímac', 'Arequipa', 'Ayacucho', 'Cajamarca', 'Callao', 'Cusco', 'Huancavelica', 'Huánuco', 'Ica', 'Junín', 'La Libertad', 'Lambayeque', 'Lima', 'Loreto', 'Madre de Dios', 'Moquegua', 'Pasco', 'Piura', 'Puno', 'San Martín', 'Tacna', 'Tumbes', 'Ucayali']
 
@@ -68,7 +71,9 @@ export default function OrderEditor({ open, onClose, orderId, onSaved }: Props) 
   const [neg, setNeg] = useState<{ items: NegativeStockItem[]; note: string; run: (note: string) => Promise<void> } | null>(null)
   const [search, setSearch] = useState('')
   const [found, setFound] = useState<EquipCustomerRow[]>([])
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const ask = useConfirm()
+  const [verified, setVerified] = useState('')
+  const [looking, setLooking] = useState(false)
 
   useEffect(() => {
     if (!open) return
@@ -112,14 +117,39 @@ export default function OrderEditor({ open, onClose, orderId, onSaved }: Props) 
   }
   const total = useMemo(() => form.items.reduce((s, it) => s + (it.is_courtesy ? 0 : it.quantity * it.unit_price), 0), [form.items])
 
-  const onSearch = (q: string) => {
-    setSearch(q)
-    clearTimeout(timer.current)
-    if (q.trim().length < 2) return setFound([])
-    timer.current = setTimeout(() => {
-      equiposOrders.listCustomers(q.trim(), 8).then(setFound).catch(() => setFound([]))
-    }, 250)
+  const debSearch = useDebounced(search, 450)
+  useEffect(() => {
+    if (!open) return
+    if (debSearch.trim().length < 2) { setFound([]); return }
+    let alive = true
+    equiposOrders.listCustomers(debSearch.trim(), 8).then((r) => alive && setFound(r)).catch(() => alive && setFound([]))
+    return () => { alive = false }
+  }, [debSearch, open])
+  const onSearch = (q: string) => setSearch(q)
+
+  // Consulta RUC/DNI en apiperu.dev: trae el nombre/razón social al completar el documento.
+  const runLookup = async (type: string, number: string, silent: boolean) => {
+    if (type !== 'DNI' && type !== 'RUC') return
+    setLooking(true)
+    try {
+      const r = await equiposOrders.lookup(type === 'DNI' ? 'dni' : 'ruc', number)
+      if (r.success && r.name) {
+        setForm((f) => (f.customer_doc_number === number ? { ...f, customer_name: r.name } : f))
+        setVerified(`${type} ${number}${r.status ? ` · ${r.status}${r.condition ? ` / ${r.condition}` : ''}` : ''}`)
+      } else if (!silent) toast.warning('El documento no se encontró en la consulta; puedes escribir el nombre a mano')
+    } catch (e) {
+      if (!silent) toast.warning(apiError(e, 'No se pudo consultar el documento'))
+    } finally {
+      setLooking(false)
+    }
   }
+  const debDoc = useDebounced(form.customer_doc_number, 600)
+  useEffect(() => {
+    if (!open || orderId || form.customer_id) return
+    const t = form.customer_doc_type
+    if ((t === 'DNI' && /^\d{8}$/.test(debDoc)) || (t === 'RUC' && /^\d{11}$/.test(debDoc))) void runLookup(t, debDoc, true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debDoc, form.customer_doc_type, open])
   const pickCustomer = (c: EquipCustomerRow) => {
     setForm((f) => ({
       ...f, customer_id: c.id, customer_name: c.name, customer_doc_type: c.doc_type, customer_doc_number: c.doc_number ?? '',
@@ -190,15 +220,28 @@ export default function OrderEditor({ open, onClose, orderId, onSaved }: Props) 
     }
   }
 
-  const save = async (confirm: boolean) => {
+  const requestSave = async (confirmOrder: boolean) => {
     const err = validate()
     if (err) return toast.error(err)
+    const editingConfirmed = !!(orderId ?? createdId) && status === 'registrado'
+    const r = await ask({
+      title: editingConfirmed ? 'Guardar cambios del pedido' : confirmOrder ? 'Confirmar pedido' : 'Guardar borrador',
+      message: editingConfirmed
+        ? 'El pedido ya está confirmado: al guardar se recalculan el stock y los saldos. Ingresa tu PIN para continuar.'
+        : confirmOrder ? `Se confirmará el pedido por ${money(total)} y se descontará el stock.` : 'Se guardará como borrador; todavía no descuenta stock.',
+      pin: editingConfirmed,
+      confirmLabel: editingConfirmed ? 'Guardar cambios' : confirmOrder ? 'Confirmar pedido' : 'Guardar borrador',
+    })
+    if (r) await save(confirmOrder, r.pin)
+  }
+
+  const save = async (confirm: boolean, pin = '') => {
     setSaving(true)
     try {
       const id = orderId ?? createdId
       if (id) {
         const run = async (allow: boolean, note: string) => {
-          const r = await equiposOrders.updateOrder(id, { ...payload(), allow_negative: allow, negative_note: note })
+          const r = await equiposOrders.updateOrder(id, { ...payload(), allow_negative: allow, negative_note: note }, pin || undefined)
           if (confirm && r.order.status === 'borrador') return void (await confirmWith(id, false, ''))
           finish(r.order, r.warnings, 'Pedido actualizado')
         }
@@ -276,7 +319,16 @@ export default function OrderEditor({ open, onClose, orderId, onSaved }: Props) 
                   <option value="DNI">DNI</option><option value="RUC">RUC</option><option value="CE">C. extranjería</option>
                 </select>
               </div>
-              <div><label className={LABEL}>N° de documento</label><input value={form.customer_doc_number} onChange={(e) => setForm((f) => ({ ...f, customer_doc_number: e.target.value.trim(), customer_id: null }))} className={INPUT} /></div>
+              <div>
+                <label className={LABEL}>N° de documento</label>
+                <div className="flex gap-1">
+                  <input value={form.customer_doc_number} onChange={(e) => { setVerified(''); setForm((f) => ({ ...f, customer_doc_number: e.target.value.trim(), customer_id: null })) }} className={INPUT} />
+                  {(form.customer_doc_type === 'DNI' || form.customer_doc_type === 'RUC') && (
+                    <button type="button" className={BTN_SECONDARY} disabled={looking || !form.customer_doc_number} onClick={() => void runLookup(form.customer_doc_type, form.customer_doc_number, false)}>{looking ? '…' : 'Consultar'}</button>
+                  )}
+                </div>
+                {verified && <p className="text-[11px] text-emerald-700 mt-0.5">Verificado: {verified}</p>}
+              </div>
               <div><label className={LABEL}>Celular / WhatsApp</label><input value={form.customer_phone} onChange={(e) => set('customer_phone', e.target.value)} className={INPUT} /></div>
               <div><label className={LABEL}>DNI de quien recoge</label><input value={form.contact_dni} onChange={(e) => set('contact_dni', e.target.value.trim())} className={INPUT} /></div>
               <label className="col-span-2 flex items-center gap-2 text-sm text-slate-700 self-end pb-2">
@@ -321,22 +373,20 @@ export default function OrderEditor({ open, onClose, orderId, onSaved }: Props) 
                     </select>
                     <div className="col-span-9 sm:col-span-4 space-y-1">
                       {it.line_type === 'producto' && (
-                        <select aria-label="Producto" value={it.product_id ?? ''} onChange={(e) => {
-                          const p = products.find((x) => x.id === Number(e.target.value))
-                          setItem(i, { product_id: p?.id ?? null, unit_price: p ? p.reference_price : 0 })
-                        }} className={INPUT}>
-                          <option value="">Elegir producto…</option>
-                          {products.filter((p) => p.active).map((p) => <option key={p.id} value={p.id}>{p.code} — {p.name}</option>)}
-                        </select>
+                        <SearchSelect ariaLabel="Producto" value={it.product_id} placeholder="Elegir producto…" searchPlaceholder="Buscar producto…"
+                          options={products.filter((p) => p.active).map((p) => ({ value: p.id, label: p.code, hint: p.name !== p.code ? p.name : undefined }))}
+                          onChange={(v) => {
+                            const pr = products.find((x) => x.id === Number(v))
+                            setItem(i, { product_id: pr?.id ?? null, unit_price: pr ? pr.reference_price : 0 })
+                          }} />
                       )}
                       {it.line_type === 'combo' && (
-                        <select aria-label="Combo" value={it.combo_id ?? ''} onChange={(e) => {
-                          const c = combos.find((x) => x.id === Number(e.target.value))
-                          setItem(i, { combo_id: c?.id ?? null, unit_price: c ? c.reference_price : 0 })
-                        }} className={INPUT}>
-                          <option value="">Elegir combo…</option>
-                          {combos.filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{c.code} — {c.components.map((x) => `${x.quantity}×${x.product_code}`).join(' + ')}</option>)}
-                        </select>
+                        <SearchSelect ariaLabel="Combo" value={it.combo_id} placeholder="Elegir combo…" searchPlaceholder="Buscar combo…"
+                          options={combos.filter((c) => c.active).map((c) => ({ value: c.id, label: c.code, hint: c.components.map((x) => `${x.quantity}×${x.product_code}`).join(' + ') }))}
+                          onChange={(v) => {
+                            const cb = combos.find((x) => x.id === Number(v))
+                            setItem(i, { combo_id: cb?.id ?? null, unit_price: cb ? cb.reference_price : 0 })
+                          }} />
                       )}
                       {(it.line_type === 'plan' || it.line_type === 'otro') && (
                         <input aria-label="Descripción" value={it.description} onChange={(e) => setItem(i, { description: e.target.value })} placeholder={it.line_type === 'plan' ? 'Ej. Plan Emprendedor' : 'Descripción'} className={INPUT} />
@@ -368,10 +418,8 @@ export default function OrderEditor({ open, onClose, orderId, onSaved }: Props) 
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
               <div>
                 <label className={LABEL}>Transportista</label>
-                <select value={form.shipment?.carrier_id ?? ''} onChange={(e) => setShip({ carrier_id: e.target.value ? Number(e.target.value) : null })} className={INPUT}>
-                  <option value="">Sin definir</option>
-                  {carriers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
+                <SearchSelect value={form.shipment?.carrier_id} placeholder="Sin definir" searchPlaceholder="Buscar transportista…" clearable
+                  options={carriers.map((c) => ({ value: c.id, label: c.name }))} onChange={(v) => setShip({ carrier_id: v ? Number(v) : null })} />
               </div>
               <div>
                 <label className={LABEL}>Modalidad</label>
@@ -416,10 +464,10 @@ export default function OrderEditor({ open, onClose, orderId, onSaved }: Props) 
           <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
             <button type="button" className={BTN_SECONDARY} onClick={onClose}>Cancelar</button>
             {editable && status !== 'registrado' && (
-              <button type="button" className={BTN_SECONDARY} disabled={saving} onClick={() => void save(false)}>Guardar borrador</button>
+              <button type="button" className={BTN_SECONDARY} disabled={saving} onClick={() => void requestSave(false)}>Guardar borrador</button>
             )}
             {editable && (
-              <button type="button" className={BTN_PRIMARY} disabled={saving} onClick={() => void save(status !== 'registrado')}>
+              <button type="button" className={BTN_PRIMARY} disabled={saving} onClick={() => void requestSave(status !== 'registrado')}>
                 {saving ? 'Guardando…' : status === 'registrado' ? 'Guardar cambios' : 'Guardar y confirmar'}
               </button>
             )}

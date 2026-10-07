@@ -31,3 +31,23 @@ body {
   to { opacity: 1; transform: translateY(0); }
 }
 .page-fade { animation: fadeIn 0.2s ease-out; }
+
+/* Los elementos accionables muestran la manita; los deshabilitados, el cursor de «no permitido». */
+@layer base {
+  button:not(:disabled),
+  [role='button']:not([aria-disabled='true']),
+  select:not(:disabled),
+  summary,
+  input[type='checkbox']:not(:disabled),
+  input[type='radio']:not(:disabled),
+  input[type='date']:not(:disabled),
+  input[type='month']:not(:disabled),
+  label[for] {
+    cursor: pointer;
+  }
+  button:disabled,
+  select:disabled,
+  input:disabled {
+    cursor: not-allowed;
+  }
+}

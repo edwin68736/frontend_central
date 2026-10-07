@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { Banknote, Pencil, Plus, Search, UserPlus } from 'lucide-react'
 import Modal from '@/components/ui/Modal'
+import PaginationBar from '@/components/ui/PaginationBar'
+import type { PerPageOption } from '@/services/pagination'
 import Spinner from '@/components/ui/Spinner'
 import { useAuth } from '@/contexts/AuthContext'
 import {
@@ -9,6 +11,8 @@ import {
 } from '@/services/equiposOrders.service'
 import { apiError, BTN_PRIMARY, BTN_SECONDARY, INPUT, LABEL } from './common'
 import OrderDetail from './OrderDetail'
+import { useConfirm } from './ConfirmProvider'
+import { useDebounced, usePaging } from './hooks'
 import { fmtDate, money, PaymentBadge, SELECT } from './ordersCommon'
 import PaymentModal from './PaymentModal'
 
@@ -38,13 +42,21 @@ export default function PaymentsTab() {
   const [mode, setMode] = useState<'clientes' | 'cobros'>('clientes')
   const [q, setQ] = useState('')
   const [customers, setCustomers] = useState<EquipCustomerRow[]>([])
+  const [custTotal, setCustTotal] = useState(0)
+  const [custPage, setCustPage] = useState(1)
+  const [custPer, setCustPer] = useState<PerPageOption>(25)
+  const [allPer, setAllPer] = useState<PerPageOption>(25)
+  const confirm = useConfirm()
+  const dq = useDebounced(q, 450)
+  const [looking, setLooking] = useState(false)
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<number | null>(null)
   const [account, setAccount] = useState<CustomerAccount | null>(null)
+  const ordersPaging = usePaging(account?.orders ?? [], 10)
+  const paysPaging = usePaging(account?.payments ?? [], 10)
   const [payOpen, setPayOpen] = useState(false)
   const [detailId, setDetailId] = useState<number | null>(null)
   const [form, setForm] = useState<{ open: boolean; id?: number; data: CustomerInput }>({ open: false, data: EMPTY_CUSTOMER })
-  const [voiding, setVoiding] = useState<{ p: PaymentView; reason: string } | null>(null)
   const [all, setAll] = useState<PaymentListResult | null>(null)
   const [allFilter, setAllFilter] = useState({ method: '', from: '', to: '', status: '', q: '' })
   const [page, setPage] = useState(1)
@@ -52,18 +64,17 @@ export default function PaymentsTab() {
   const loadCustomers = useCallback(async () => {
     setLoading(true)
     try {
-      setCustomers(await equiposOrders.listCustomers(q.trim() || undefined, 100))
+      const r = await equiposOrders.listCustomersPaged(dq.trim() || undefined, custPage, custPer)
+      setCustomers(r.rows)
+      setCustTotal(r.total)
     } catch (e) {
       toast.error(apiError(e, 'No se pudieron cargar los clientes'))
     } finally {
       setLoading(false)
     }
-  }, [q])
+  }, [dq, custPage, custPer])
 
-  useEffect(() => {
-    const t = setTimeout(() => void loadCustomers(), 200)
-    return () => clearTimeout(t)
-  }, [loadCustomers])
+  useEffect(() => { void loadCustomers() }, [loadCustomers])
 
   const loadAccount = useCallback(async (id: number) => {
     try {
@@ -78,16 +89,17 @@ export default function PaymentsTab() {
     if (selected) void loadAccount(selected)
   }, [selected, loadAccount])
 
+  const dqAll = useDebounced(allFilter.q, 450)
   const loadAll = useCallback(async () => {
     try {
       setAll(await equiposOrders.listPayments({
         method: allFilter.method || undefined, from: allFilter.from || undefined, to: allFilter.to || undefined,
-        status: allFilter.status || undefined, q: allFilter.q.trim() || undefined, page, per_page: 30,
+        status: allFilter.status || undefined, q: dqAll.trim() || undefined, page, per_page: allPer,
       }))
     } catch (e) {
       toast.error(apiError(e, 'No se pudieron cargar los cobros'))
     }
-  }, [allFilter, page])
+  }, [allFilter.method, allFilter.from, allFilter.to, allFilter.status, dqAll, page, allPer])
 
   useEffect(() => { if (mode === 'cobros') void loadAll() }, [mode, loadAll])
 
@@ -102,6 +114,7 @@ export default function PaymentsTab() {
     if (!d.name.trim()) return toast.error('El nombre es obligatorio')
     if (d.doc_type === 'DNI' && !/^\d{8}$/.test(d.doc_number)) return toast.error('El DNI debe tener 8 dígitos')
     if (d.doc_type === 'RUC' && !/^\d{11}$/.test(d.doc_number)) return toast.error('El RUC debe tener 11 dígitos')
+    if (!(await confirm({ title: form.id ? 'Guardar cambios del cliente' : 'Registrar cliente', message: `${d.name.trim()} · ${d.doc_type} ${d.doc_number}`, confirmLabel: 'Guardar' }))) return
     try {
       const c = form.id ? await equiposOrders.updateCustomer(form.id, d) : await equiposOrders.createCustomer(d)
       toast.success('Cliente guardado')
@@ -113,18 +126,40 @@ export default function PaymentsTab() {
     }
   }
 
-  const doVoid = async () => {
-    if (!voiding) return
-    if (!voiding.reason.trim()) return toast.error('Indica el motivo')
+  const voidPayment = async (pay: PaymentView) => {
+    const r = await confirm({ title: 'Anular cobro', message: `Se anulará el cobro de ${money(pay.amount)} y se recalcularán los saldos de los pedidos a los que estaba aplicado.`, danger: true, pin: true, input: { label: 'Motivo de la anulación', required: true }, confirmLabel: 'Anular cobro' })
+    if (!r) return
     try {
-      await equiposOrders.voidPayment(voiding.p.id, voiding.reason.trim())
+      await equiposOrders.voidPayment(pay.id, r.text, r.pin)
       toast.success('Cobro anulado; los saldos se recalcularon')
-      setVoiding(null)
       refresh()
     } catch (e) {
       toast.error(apiError(e, 'No se pudo anular el cobro'))
     }
   }
+
+  // Consulta RUC/DNI para completar el nombre del cliente.
+  const lookupDoc = async (silent: boolean) => {
+    const { doc_type: t, doc_number: n } = form.data
+    if (t !== 'DNI' && t !== 'RUC') return
+    setLooking(true)
+    try {
+      const r = await equiposOrders.lookup(t === 'DNI' ? 'dni' : 'ruc', n)
+      if (r.success && r.name) setForm((f) => (f.data.doc_number === n ? { ...f, data: { ...f.data, name: r.name } } : f))
+      else if (!silent) toast.warning('El documento no se encontró en la consulta')
+    } catch (e) {
+      if (!silent) toast.warning(apiError(e, 'No se pudo consultar el documento'))
+    } finally {
+      setLooking(false)
+    }
+  }
+  const debDoc = useDebounced(form.data.doc_number, 600)
+  useEffect(() => {
+    if (!form.open || form.id) return
+    const t = form.data.doc_type
+    if ((t === 'DNI' && /^\d{8}$/.test(debDoc)) || (t === 'RUC' && /^\d{11}$/.test(debDoc))) void lookupDoc(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debDoc, form.open])
 
   const openForm = (c?: CustomerAccount['customer']) =>
     setForm({ open: true, id: c?.id, data: c ? { name: c.name, doc_type: c.doc_type, doc_number: c.doc_number ?? '', contact_dni: c.contact_dni, phone: c.phone, notes: c.notes } : EMPTY_CUSTOMER })
@@ -146,11 +181,11 @@ export default function PaymentsTab() {
             <div className="flex gap-2">
               <div className="relative flex-1">
                 <Search size={16} className="absolute left-3 top-2.5 text-slate-400" />
-                <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar cliente…" className={INPUT + ' pl-9'} />
+                <input value={q} onChange={(e) => { setCustPage(1); setQ(e.target.value) }} placeholder="Buscar cliente…" className={INPUT + ' pl-9'} />
               </div>
               {canEditCustomer && <button type="button" aria-label="Nuevo cliente" className={BTN_PRIMARY + ' !px-3'} onClick={() => openForm()}><UserPlus size={16} /></button>}
             </div>
-            {loading ? <div className="flex justify-center py-8"><Spinner /></div> : (
+            {loading && customers.length === 0 ? <div className="flex justify-center py-8"><Spinner /></div> : (
               <ul className="divide-y divide-slate-100 max-h-[60vh] overflow-auto">
                 {customers.map((c) => (
                   <li key={c.id}>
@@ -167,6 +202,7 @@ export default function PaymentsTab() {
                 {customers.length === 0 && <li className="text-center text-sm text-slate-400 py-8">Sin clientes.</li>}
               </ul>
             )}
+            <PaginationBar page={custPage} perPage={custPer} total={custTotal} totalPages={Math.max(1, Math.ceil(custTotal / custPer))} onPageChange={setCustPage} onPerPageChange={(n) => { setCustPer(n); setCustPage(1) }} itemLabel="clientes" />
           </div>
 
           <div className="space-y-4">
@@ -197,7 +233,7 @@ export default function PaymentsTab() {
                   <table className="w-full text-sm">
                     <thead><tr className="text-left text-xs text-slate-500 border-b border-slate-200"><th className="px-3 py-2">N°</th><th>Fecha</th><th className="text-right">Total</th><th className="text-right">Cobrado</th><th className="text-right">Saldo</th><th className="px-3">Pago</th></tr></thead>
                     <tbody className="divide-y divide-slate-100">
-                      {account.orders.map((o) => (
+                      {ordersPaging.rows.map((o) => (
                         <tr key={o.id} onClick={() => setDetailId(o.id)} className={`cursor-pointer hover:bg-slate-50 ${o.status === 'anulado' ? 'opacity-40' : ''}`}>
                           <td className="px-3 py-1.5 font-medium">{o.order_number}</td><td>{fmtDate(o.order_date)}</td>
                           <td className="text-right">{money(o.total_amount)}</td><td className="text-right">{money(o.paid_amount)}</td>
@@ -208,6 +244,7 @@ export default function PaymentsTab() {
                       {account.orders.length === 0 && <tr><td colSpan={6} className="text-center text-slate-400 py-6">Sin pedidos.</td></tr>}
                     </tbody>
                   </table>
+                  <PaginationBar {...ordersPaging.barProps} itemLabel="pedidos" />
                 </div>
 
                 <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
@@ -215,10 +252,11 @@ export default function PaymentsTab() {
                   <table className="w-full text-sm">
                     <thead><tr className="text-left text-xs text-slate-500 border-b border-slate-200"><th className="px-3 py-2">Fecha</th><th className="px-3">Monto</th><th className="px-3">Medio</th><th className="px-3">Referencia</th><th className="px-3">Aplicado a</th><th /></tr></thead>
                     <tbody className="divide-y divide-slate-100">
-                      {account.payments.map((p) => <PaymentRow key={p.id} p={p} canVoid={canPay} onVoid={(x) => setVoiding({ p: x, reason: '' })} />)}
+                      {paysPaging.rows.map((p) => <PaymentRow key={p.id} p={p} canVoid={canPay} onVoid={(x) => void voidPayment(x)} />)}
                       {account.payments.length === 0 && <tr><td colSpan={6} className="text-center text-slate-400 py-6">Sin pagos registrados.</td></tr>}
                     </tbody>
                   </table>
+                  <PaginationBar {...paysPaging.barProps} itemLabel="pagos" />
                 </div>
               </>
             )}
@@ -243,18 +281,13 @@ export default function PaymentsTab() {
               <thead><tr className="text-left text-xs text-slate-500 border-b border-slate-200 bg-slate-50"><th className="px-3 py-2">Fecha</th><th className="px-3">Monto</th><th className="px-3">Medio</th><th className="px-3">Referencia</th><th className="px-3">Aplicado a</th><th /></tr></thead>
               <tbody className="divide-y divide-slate-100">
                 {(all?.rows ?? []).map((p) => (
-                  <PaymentRow key={p.id} p={{ ...p, allocations: p.allocations }} canVoid={canPay} onVoid={(x) => setVoiding({ p: x, reason: '' })} />
+                  <PaymentRow key={p.id} p={{ ...p, allocations: p.allocations }} canVoid={canPay} onVoid={(x) => void voidPayment(x)} />
                 ))}
                 {all && all.rows.length === 0 && <tr><td colSpan={6} className="text-center text-slate-400 py-10">No hay cobros con esos filtros.</td></tr>}
               </tbody>
             </table>
           </div>
-          {all && all.total > all.per_page && (
-            <div className="flex justify-end gap-2 text-sm">
-              <button type="button" className={BTN_SECONDARY} disabled={page <= 1} onClick={() => setPage(page - 1)}>Anterior</button>
-              <button type="button" className={BTN_SECONDARY} disabled={page * all.per_page >= all.total} onClick={() => setPage(page + 1)}>Siguiente</button>
-            </div>
-          )}
+          {all && <PaginationBar page={page} perPage={allPer} total={all.total} totalPages={Math.max(1, Math.ceil(all.total / allPer))} onPageChange={setPage} onPerPageChange={(n) => { setAllPer(n); setPage(1) }} itemLabel="cobros" />}
         </div>
       )}
 
@@ -267,7 +300,7 @@ export default function PaymentsTab() {
           <div className="grid grid-cols-2 gap-3">
             <div><label className={LABEL}>Tipo de documento</label>
               <select value={form.data.doc_type} onChange={(e) => setForm((f) => ({ ...f, data: { ...f.data, doc_type: e.target.value } }))} className={INPUT}><option value="DNI">DNI</option><option value="RUC">RUC</option><option value="CE">C. extranjería</option></select></div>
-            <div><label className={LABEL}>N° de documento *</label><input value={form.data.doc_number} onChange={(e) => setForm((f) => ({ ...f, data: { ...f.data, doc_number: e.target.value.trim() } }))} className={INPUT} /></div>
+            <div><label className={LABEL}>N° de documento *</label><div className="flex gap-1"><input value={form.data.doc_number} onChange={(e) => setForm((f) => ({ ...f, data: { ...f.data, doc_number: e.target.value.trim() } }))} className={INPUT} />{(form.data.doc_type === 'DNI' || form.data.doc_type === 'RUC') && <button type="button" className={BTN_SECONDARY} disabled={looking || !form.data.doc_number} onClick={() => void lookupDoc(false)}>{looking ? '…' : 'Consultar'}</button>}</div></div>
             <div><label className={LABEL}>Celular / WhatsApp</label><input value={form.data.phone} onChange={(e) => setForm((f) => ({ ...f, data: { ...f.data, phone: e.target.value } }))} className={INPUT} /></div>
             <div><label className={LABEL}>DNI de contacto</label><input value={form.data.contact_dni} onChange={(e) => setForm((f) => ({ ...f, data: { ...f.data, contact_dni: e.target.value.trim() } }))} className={INPUT} /></div>
           </div>
@@ -276,13 +309,6 @@ export default function PaymentsTab() {
         </div>
       </Modal>
 
-      <Modal open={voiding != null} onClose={() => setVoiding(null)} title="Anular cobro">
-        <div className="space-y-3">
-          <p className="text-sm text-slate-600">Se anulará el cobro de {voiding && money(voiding.p.amount)} y se recalcularán los saldos de los pedidos a los que estaba aplicado.</p>
-          <input value={voiding?.reason ?? ''} onChange={(e) => voiding && setVoiding({ ...voiding, reason: e.target.value })} placeholder="Motivo (obligatorio)" className={INPUT} autoFocus />
-          <div className="flex justify-end gap-2"><button type="button" className={BTN_SECONDARY} onClick={() => setVoiding(null)}>Cancelar</button><button type="button" className={BTN_PRIMARY} onClick={() => void doVoid()}>Anular cobro</button></div>
-        </div>
-      </Modal>
     </div>
   )
 }

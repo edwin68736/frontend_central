@@ -2,9 +2,11 @@ import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { AlertTriangle, MessageCircle } from 'lucide-react'
 import Spinner from '@/components/ui/Spinner'
+import PaginationBar from '@/components/ui/PaginationBar'
 import { equiposControl, type AlertItem, type Dashboard } from '@/services/equiposControl.service'
 import { apiError, currentPeriod } from './common'
 import OrderDetail from './OrderDetail'
+import { usePaging } from './hooks'
 import OrderEditor from './OrderEditor'
 import { money, SELECT } from './ordersCommon'
 import { waLink, waText, type WaKind } from './whatsapp'
@@ -37,6 +39,7 @@ export default function DashboardTab() {
   const [loading, setLoading] = useState(true)
   const [detailId, setDetailId] = useState<number | null>(null)
   const [editId, setEditId] = useState<number | null>(null)
+  const paging = usePaging(alerts, 10)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -92,7 +95,7 @@ export default function DashboardTab() {
         <p className="px-4 py-3 text-sm font-semibold text-slate-800 border-b border-slate-100">Requiere acción ({alerts.length})</p>
         {alerts.length === 0 ? <p className="text-center text-slate-400 py-8 text-sm">Nada pendiente. 🎉</p> : (
           <ul className="divide-y divide-slate-100">
-            {alerts.map((a, i) => {
+            {paging.rows.map((a, i) => {
               const kind = KIND_WA[a.kind]
               const link = kind ? waLink(a.customer_phone, waText(kind, { customer: a.customer_name, orderNumber: a.order_number, carrier: a.carrier_name, guide: a.guide_number, balance: a.balance_amount })) : null
               return (
@@ -106,6 +109,7 @@ export default function DashboardTab() {
             })}
           </ul>
         )}
+        {alerts.length > 0 && <PaginationBar {...paging.barProps} itemLabel="alertas" />}
       </div>
 
       <OrderDetail orderId={detailId} onClose={() => setDetailId(null)} onChanged={() => void load()} onEdit={(id) => { setDetailId(null); setEditId(id) }} />

@@ -224,13 +224,16 @@ export const equiposService = {
   updateCarrier: (id: number, body: EquipCarrierInput) => api.put(`${base}/carriers/${id}`, body).then((r) => r.data.data as EquipCarrier),
 
   getSettings: () => api.get<{ data: EquipSettings }>(`${base}/settings`).then((r) => r.data.data),
+  hasSecurityPin: () => api.get<{ has_security_pin: boolean }>(`${base}/settings`).then((r) => !!r.data.has_security_pin),
+  setSecurityPin: (pin: string, currentPin?: string) => api.post(`${base}/settings/pin`, { pin, current_pin: currentPin }).then((r) => r.data),
   updateSettings: (body: EquipSettings) => api.put<{ data: EquipSettings }>(`${base}/settings`, body).then((r) => r.data.data),
 
   stock: (period?: string) =>
     api.get<{ period: string; data: EquipStockRow[] }>(`${base}/stock`, { params: { period } }).then((r) => ({ period: r.data.period, rows: r.data.data ?? [] })),
   movements: (productId: number, limit = 200) =>
     api.get<{ data: EquipMovement[] }>(`${base}/stock/${productId}/movements`, { params: { limit } }).then((r) => r.data.data ?? []),
-  addMovement: (body: EquipMovementInput) => api.post(`${base}/stock/movements`, body).then((r) => r.data.data),
+  addMovement: (body: EquipMovementInput, pin?: string) =>
+    api.post(`${base}/stock/movements`, body, pin ? { headers: { 'X-Security-Pin': pin } } : undefined).then((r) => r.data.data),
 
   importPreview: (payload: ImportPayload) => api.post<{ data: ImportPreview }>(`${base}/import/preview`, payload).then((r) => r.data.data),
   importCommit: (payload: ImportPayload) =>

@@ -129,6 +129,8 @@ export interface ProfitRow { sale_type: string; revenue: number; cogs: number; f
 export interface ProfitReport { period: string; rows: ProfitRow[]; total: ProfitRow; return_cost: number; cost_coverage: number; missing_cost_products: string[] }
 export interface ClosedPeriod { period: string; closed_at: string; products: number }
 
+const pinHeader = (pin?: string) => (pin ? { headers: { 'X-Security-Pin': pin } } : undefined)
+
 export const equiposControl = {
   listReturns: (status?: string) => api.get<{ data: EquipReturnView[] }>(`${base}/returns`, { params: { status } }).then((r) => r.data.data ?? []),
   createReturn: (b: ReturnInput) => api.post<{ data: EquipReturnView }>(`${base}/returns`, b).then((r) => r.data.data),
@@ -145,6 +147,6 @@ export const equiposControl = {
   replenishment: () => api.get<{ data: ReplenishRow[] }>(`${base}/reports/replenishment`).then((r) => r.data.data ?? []),
   profit: (period: string) => api.get<{ data: ProfitReport }>(`${base}/reports/profit`, { params: { period } }).then((r) => r.data.data),
   periods: () => api.get<{ data: ClosedPeriod[] }>(`${base}/periods`).then((r) => r.data.data ?? []),
-  closePeriod: (period: string) => api.post(`${base}/periods/${period}/close`).then((r) => r.data.data as ClosedPeriod),
-  reopenPeriod: (period: string) => api.post(`${base}/periods/${period}/reopen`).then((r) => r.data),
+  closePeriod: (period: string, pin?: string) => api.post(`${base}/periods/${period}/close`, undefined, pinHeader(pin)).then((r) => r.data.data as ClosedPeriod),
+  reopenPeriod: (period: string, pin?: string) => api.post(`${base}/periods/${period}/reopen`, undefined, pinHeader(pin)).then((r) => r.data),
 }

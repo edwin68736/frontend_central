@@ -321,7 +321,25 @@ interface OrderResponse {
 }
 const unwrap = (r: { data: OrderResponse }) => ({ order: r.data.data, warnings: r.data.warnings ?? [] })
 
+const pinHeader = (pin?: string) => (pin ? { headers: { 'X-Security-Pin': pin } } : undefined)
+
+export interface Lookup {
+  success: boolean
+  name: string
+  doc_number: string
+  address?: string
+  department?: string
+  province?: string
+  district?: string
+  status?: string
+  condition?: string
+}
+
 export const equiposOrders = {
+  lookup: (type: 'dni' | 'ruc', number: string) =>
+    api.get<{ data: Lookup }>(`${base}/lookup/${type}`, { params: { number } }).then((r) => r.data.data),
+  listCustomersPaged: (q: string | undefined, page: number, perPage: number) =>
+    api.get<{ data: EquipCustomerRow[]; total: number }>(`${base}/customers`, { params: { q, page, limit: perPage } }).then((r) => ({ rows: r.data.data ?? [], total: r.data.total ?? 0 })),
   listCustomers: (q?: string, limit = 50) =>
     api.get<{ data: EquipCustomerRow[] }>(`${base}/customers`, { params: { q, limit } }).then((r) => r.data.data ?? []),
   createCustomer: (body: CustomerInput) => api.post(`${base}/customers`, body).then((r) => r.data.data as EquipCustomerRow),
@@ -332,14 +350,14 @@ export const equiposOrders = {
   listOrders: (f: OrderFilter) => api.get<{ data: OrderListResult }>(`${base}/orders`, { params: f }).then((r) => r.data.data),
   getOrder: (id: number) => api.get<{ data: OrderView }>(`${base}/orders/${id}`).then((r) => r.data.data),
   createOrder: (body: OrderInput) => api.post<OrderResponse>(`${base}/orders`, body).then(unwrap),
-  updateOrder: (id: number, body: OrderInput & { allow_negative?: boolean; negative_note?: string }) =>
-    api.put<OrderResponse>(`${base}/orders/${id}`, body).then(unwrap),
+  updateOrder: (id: number, body: OrderInput & { allow_negative?: boolean; negative_note?: string }, pin?: string) =>
+    api.put<OrderResponse>(`${base}/orders/${id}`, body, pinHeader(pin)).then(unwrap),
   confirmOrder: (id: number, body: { allow_negative?: boolean; negative_note?: string } = {}) =>
     api.post<OrderResponse>(`${base}/orders/${id}/confirm`, body).then(unwrap),
-  cancelOrder: (id: number, reason: string) => api.post<OrderResponse>(`${base}/orders/${id}/cancel`, { reason }).then(unwrap),
+  cancelOrder: (id: number, reason: string, pin?: string) => api.post<OrderResponse>(`${base}/orders/${id}/cancel`, { reason }, pinHeader(pin)).then(unwrap),
   validateOrder: (id: number, notes = '') => api.post<OrderResponse>(`${base}/orders/${id}/validate`, { notes }).then(unwrap),
   observeOrder: (id: number, notes: string) => api.post<OrderResponse>(`${base}/orders/${id}/observe`, { notes }).then(unwrap),
-  setNoPayment: (id: number, on: boolean) => api.post<OrderResponse>(`${base}/orders/${id}/no-payment`, { on }).then(unwrap),
+  setNoPayment: (id: number, on: boolean, pin?: string) => api.post<OrderResponse>(`${base}/orders/${id}/no-payment`, { on }, pinHeader(pin)).then(unwrap),
 
   listShipments: (params: { status?: string; carrier_id?: number; q?: string }) =>
     api.get<{ data: ShipmentRow[] }>(`${base}/shipments`, { params }).then((r) => r.data.data ?? []),
@@ -352,7 +370,7 @@ export const equiposOrders = {
   listPayments: (params: { customer_id?: number; from?: string; to?: string; method?: string; status?: string; q?: string; page?: number; per_page?: number }) =>
     api.get<{ data: PaymentListResult }>(`${base}/payments`, { params }).then((r) => r.data.data),
   createPayment: (body: PaymentInput) => api.post<{ data: PaymentView }>(`${base}/payments`, body).then((r) => r.data.data),
-  voidPayment: (id: number, reason: string) => api.post<{ data: PaymentView }>(`${base}/payments/${id}/void`, { reason }).then((r) => r.data.data),
+  voidPayment: (id: number, reason: string, pin?: string) => api.post<{ data: PaymentView }>(`${base}/payments/${id}/void`, { reason }, pinHeader(pin)).then((r) => r.data.data),
   allocatePayment: (id: number, allocations: { order_id: number; amount: number }[]) =>
     api.post<{ data: PaymentView }>(`${base}/payments/${id}/allocate`, { allocations }).then((r) => r.data.data),
 }

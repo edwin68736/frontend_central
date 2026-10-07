@@ -3,6 +3,8 @@ import { toast } from 'sonner'
 import { Pencil, Plus, Search, Trash2 } from 'lucide-react'
 import Modal from '@/components/ui/Modal'
 import Spinner from '@/components/ui/Spinner'
+import PaginationBar from '@/components/ui/PaginationBar'
+import SearchSelect from '@/components/ui/SearchSelect'
 import { useAuth } from '@/contexts/AuthContext'
 import {
   equiposService,
@@ -12,6 +14,8 @@ import {
   type EquipProduct,
   type EquipProductInput,
 } from '@/services/equipos.service'
+import { useConfirm } from './ConfirmProvider'
+import { useDebounced, usePaging } from './hooks'
 import { ActiveBadge, apiError, BTN_PRIMARY, BTN_SECONDARY, INPUT, LABEL, SemaphoreBadge } from './common'
 
 const EMPTY_PRODUCT: EquipProductInput = {
@@ -34,6 +38,8 @@ export default function CatalogTab() {
   const [pForm, setPForm] = useState<{ open: boolean; id?: number; data: EquipProductInput }>({ open: false, data: EMPTY_PRODUCT })
   const [cForm, setCForm] = useState<{ open: boolean; data: ComboForm }>({ open: false, data: EMPTY_COMBO })
   const [saving, setSaving] = useState(false)
+  const confirm = useConfirm()
+  const dq = useDebounced(q, 450)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -53,7 +59,7 @@ export default function CatalogTab() {
     void load()
   }, [load])
 
-  const term = q.trim().toLowerCase()
+  const term = dq.trim().toLowerCase()
   const shownProducts = useMemo(
     () => products.filter((p) => (showInactive || p.active) && (!term || p.code.toLowerCase().includes(term) || p.name.toLowerCase().includes(term))),
     [products, term, showInactive],
@@ -63,6 +69,8 @@ export default function CatalogTab() {
     [combos, term, showInactive],
   )
   const activeProducts = useMemo(() => products.filter((p) => p.active), [products])
+  const prodP = usePaging(shownProducts, 25)
+  const comboP = usePaging(shownCombos, 10)
 
   const openProduct = (p?: EquipProduct) =>
     setPForm({
@@ -77,6 +85,7 @@ export default function CatalogTab() {
     const d = pForm.data
     if (!d.code.trim()) return toast.error('El código es obligatorio')
     if (d.yellow_threshold > d.green_threshold) return toast.error('El umbral amarillo no puede ser mayor que el verde')
+    if (!(await confirm({ title: pForm.id ? 'Guardar cambios del producto' : 'Crear producto', message: `${d.code.trim()}${d.name ? ' — ' + d.name : ''}`, confirmLabel: 'Guardar' }))) return
     setSaving(true)
     try {
       if (pForm.id) await equiposService.updateProduct(pForm.id, d)
@@ -111,6 +120,7 @@ export default function CatalogTab() {
       active: d.active,
       items: items.map((i) => ({ product_id: Number(i.product_id), quantity: Math.max(1, Math.floor(Number(i.quantity) || 1)) })),
     }
+    if (!(await confirm({ title: d.id ? 'Guardar cambios del combo' : 'Crear combo', message: `${d.code.trim()}: ${items.length} componente(s). Los pedidos ya vendidos conservan su composición.`, confirmLabel: 'Guardar' }))) return
     setSaving(true)
     try {
       if (d.id) await equiposService.updateCombo(d.id, body)
@@ -160,7 +170,7 @@ export default function CatalogTab() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {shownProducts.map((p) => (
+              {prodP.rows.map((p) => (
                 <tr key={p.id} className="hover:bg-slate-50/70">
                   <td className="px-3 py-2 font-medium text-slate-800">{p.code}{p.name !== p.code && <span className="block text-xs text-slate-400 font-normal">{p.name}</span>}</td>
                   <td className="px-3 py-2 text-slate-600">{EQUIP_KIND_LABEL[p.kind]}</td>
@@ -176,6 +186,7 @@ export default function CatalogTab() {
               {shownProducts.length === 0 && <tr><td colSpan={9} className="px-4 py-10 text-center text-slate-400">No hay productos. {canEdit ? 'Crea el primero o importa el Excel.' : ''}</td></tr>}
             </tbody>
           </table>
+          {shownProducts.length > 0 && <PaginationBar {...prodP.barProps} itemLabel="productos" />}
         </div>
       </section>
 
@@ -186,7 +197,7 @@ export default function CatalogTab() {
         </div>
         <p className="text-xs text-slate-500 mb-2">Un combo no tiene stock propio: al venderlo se descuentan sus componentes.</p>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {shownCombos.map((c) => (
+          {comboP.rows.map((c) => (
             <div key={c.id} className="bg-white rounded-xl border border-slate-200 p-4">
               <div className="flex items-start justify-between gap-2">
                 <div>
@@ -205,6 +216,7 @@ export default function CatalogTab() {
           ))}
           {shownCombos.length === 0 && <p className="text-sm text-slate-400 col-span-full py-6 text-center">No hay combos.</p>}
         </div>
+        {shownCombos.length > 0 && <PaginationBar {...comboP.barProps} itemLabel="combos" />}
       </section>
 
       <Modal open={pForm.open} onClose={() => setPForm((f) => ({ ...f, open: false }))} title={pForm.id ? 'Editar producto' : 'Nuevo producto'}>
@@ -245,14 +257,9 @@ export default function CatalogTab() {
             <div className="space-y-2">
               {cForm.data.items.map((it, idx) => (
                 <div key={idx} className="flex gap-2">
-                  <select
-                    value={it.product_id}
-                    onChange={(e) => setCForm((f) => ({ ...f, data: { ...f.data, items: f.data.items.map((x, i) => (i === idx ? { ...x, product_id: e.target.value ? Number(e.target.value) : '' } : x)) } }))}
-                    className={INPUT}
-                  >
-                    <option value="">Producto…</option>
-                    {activeProducts.map((p) => <option key={p.id} value={p.id}>{p.code}</option>)}
-                  </select>
+                  <SearchSelect className="flex-1" value={it.product_id === '' ? null : it.product_id} placeholder="Producto…" searchPlaceholder="Buscar producto…"
+                    options={activeProducts.map((p) => ({ value: p.id, label: p.code, hint: p.name !== p.code ? p.name : undefined }))}
+                    onChange={(v) => setCForm((f) => ({ ...f, data: { ...f.data, items: f.data.items.map((x, i) => (i === idx ? { ...x, product_id: v ? Number(v) : '' } : x)) } }))} />
                   <input
                     type="number" min={1} value={it.quantity}
                     onChange={(e) => setCForm((f) => ({ ...f, data: { ...f.data, items: f.data.items.map((x, i) => (i === idx ? { ...x, quantity: e.target.value } : x)) } }))}

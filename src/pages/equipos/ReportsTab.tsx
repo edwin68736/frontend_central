@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import { Download, Lock, Unlock } from 'lucide-react'
 import { writeXlsx, type CellValue } from 'hucre'
 import Spinner from '@/components/ui/Spinner'
+import PaginationBar from '@/components/ui/PaginationBar'
 import { useAuth } from '@/contexts/AuthContext'
 import {
   equiposControl, type ClosedPeriod, type Collections, type ProfitReport, type ReplenishRow, type SalesReport, type Summary,
@@ -11,6 +12,8 @@ import { METHOD_LABEL, SALE_TYPE_LABEL } from '@/services/equiposOrders.service'
 import { downloadXlsxBytes } from '@/utils/downloadXlsx'
 import { apiError, BTN_PRIMARY, BTN_SECONDARY, currentPeriod, formatDateTime } from './common'
 import { fmtDate, money, SELECT } from './ordersCommon'
+import { useConfirm } from './ConfirmProvider'
+import { usePaging } from './hooks'
 
 type Section = 'resumen' | 'ventas' | 'cobranza' | 'reposicion' | 'utilidad' | 'cierre'
 const SECTIONS: { key: Section; label: string }[] = [
@@ -39,6 +42,12 @@ export default function ReportsTab() {
   const [rep, setRep] = useState<ReplenishRow[] | null>(null)
   const [profit, setProfit] = useState<ProfitReport | null>(null)
   const [closed, setClosed] = useState<ClosedPeriod[]>([])
+  const confirm = useConfirm()
+  const linesP = usePaging(sales?.lines ?? [], 10)
+  const unitsP = usePaging(sales?.units ?? [], 10)
+  const debtP = usePaging(coll?.customers ?? [], 10)
+  const repP = usePaging(rep ?? [], 10)
+  const closedP = usePaging(closed, 10)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -98,12 +107,14 @@ export default function ReportsTab() {
   }
 
   const closePeriod = async (p: string) => {
-    if (!window.confirm(`¿Cerrar ${p}? Congela su stock inicial y final y bloquea movimientos manuales con fecha en ese mes.`)) return
-    try { await equiposControl.closePeriod(p); toast.success(`${p} cerrado`); void load() } catch (e) { toast.error(apiError(e, 'No se pudo cerrar el período')) }
+    const r = await confirm({ title: `Cerrar ${p}`, message: 'Congela el stock inicial y final de cada producto y bloquea los movimientos manuales con fecha en ese mes.', pin: true, confirmLabel: 'Cerrar mes' })
+    if (!r) return
+    try { await equiposControl.closePeriod(p, r.pin); toast.success(`${p} cerrado`); void load() } catch (e) { toast.error(apiError(e, 'No se pudo cerrar el período')) }
   }
   const reopen = async (p: string) => {
-    if (!window.confirm(`¿Reabrir ${p}?`)) return
-    try { await equiposControl.reopenPeriod(p); toast.success(`${p} reabierto`); void load() } catch (e) { toast.error(apiError(e, 'No se pudo reabrir')) }
+    const r = await confirm({ title: `Reabrir ${p}`, message: 'Se podrán registrar movimientos manuales con fecha en ese mes otra vez.', danger: true, pin: true, confirmLabel: 'Reabrir' })
+    if (!r) return
+    try { await equiposControl.reopenPeriod(p, r.pin); toast.success(`${p} reabierto`); void load() } catch (e) { toast.error(apiError(e, 'No se pudo reabrir')) }
   }
 
   const needsPeriod = section === 'resumen' || section === 'ventas' || section === 'utilidad'
@@ -160,19 +171,21 @@ export default function ReportsTab() {
                 <table className="w-full text-sm">
                   <thead><tr className="border-b border-slate-200"><th className={TH}>Concepto</th><th className={TH + ' text-right'}>Cant.</th><th className={TH + ' text-right'}>Importe</th></tr></thead>
                   <tbody className="divide-y divide-slate-100">
-                    {sales.lines.map((l, i) => <tr key={i}><td className="px-3 py-1.5">{l.code || l.name}<span className="ml-2 text-xs text-slate-400">{l.kind}</span></td><td className="px-3 text-right">{l.quantity}</td><td className="px-3 text-right">{money(l.amount)}</td></tr>)}
+                    {linesP.rows.map((l, i) => <tr key={i}><td className="px-3 py-1.5">{l.code || l.name}<span className="ml-2 text-xs text-slate-400">{l.kind}</span></td><td className="px-3 text-right">{l.quantity}</td><td className="px-3 text-right">{money(l.amount)}</td></tr>)}
                     {sales.lines.length === 0 && <tr><td colSpan={3} className="px-3 py-6 text-center text-slate-400">Sin ventas en el mes.</td></tr>}
                   </tbody>
                 </table>
+                <PaginationBar {...linesP.barProps} itemLabel="conceptos" />
               </div>
               <div className={TABLE}>
                 <p className="px-3 pt-3 text-sm font-semibold text-slate-800">Unidades que salieron (como el Stock Maestro)</p>
                 <table className="w-full text-sm">
                   <thead><tr className="border-b border-slate-200"><th className={TH}>Producto</th><th className={TH + ' text-right'}>Directo</th><th className={TH + ' text-right'}>Directo Promo</th><th className={TH + ' text-right'}>Combo</th><th className={TH + ' text-right'}>Combo Promo</th><th className={TH + ' text-right'}>Total</th></tr></thead>
                   <tbody className="divide-y divide-slate-100">
-                    {sales.units.map((u) => <tr key={u.code}><td className="px-3 py-1.5 font-medium">{u.code}</td><td className="px-3 text-right">{u.direct_independiente}</td><td className="px-3 text-right">{u.direct_promo_tk}</td><td className="px-3 text-right">{u.combo_independiente}</td><td className="px-3 text-right">{u.combo_promo_tk}</td><td className="px-3 text-right font-semibold">{u.total}</td></tr>)}
+                    {unitsP.rows.map((u) => <tr key={u.code}><td className="px-3 py-1.5 font-medium">{u.code}</td><td className="px-3 text-right">{u.direct_independiente}</td><td className="px-3 text-right">{u.direct_promo_tk}</td><td className="px-3 text-right">{u.combo_independiente}</td><td className="px-3 text-right">{u.combo_promo_tk}</td><td className="px-3 text-right font-semibold">{u.total}</td></tr>)}
                   </tbody>
                 </table>
+                <PaginationBar {...unitsP.barProps} itemLabel="productos" />
               </div>
             </div>
           )}
@@ -188,7 +201,7 @@ export default function ReportsTab() {
                 <table className="w-full text-sm">
                   <thead><tr className="border-b border-slate-200 bg-slate-50"><th className={TH}>Cliente</th><th className={TH + ' text-right'}>0–15</th><th className={TH + ' text-right'}>16–30</th><th className={TH + ' text-right'}>31–60</th><th className={TH + ' text-right'}>+60</th><th className={TH + ' text-right'}>Total</th><th className={TH}>Pedidos</th></tr></thead>
                   <tbody className="divide-y divide-slate-100">
-                    {coll.customers.map((c, i) => (
+                    {debtP.rows.map((c, i) => (
                       <tr key={i}><td className="px-3 py-2">{c.customer_name}<span className="block text-xs text-slate-400">{c.customer_phone} · el más antiguo: {c.oldest_days} días</span></td>
                         <td className="px-3 text-right">{c.b0_15 ? money(c.b0_15) : '—'}</td><td className="px-3 text-right">{c.b16_30 ? money(c.b16_30) : '—'}</td><td className="px-3 text-right">{c.b31_60 ? money(c.b31_60) : '—'}</td><td className="px-3 text-right text-red-700">{c.b60_plus ? money(c.b60_plus) : '—'}</td>
                         <td className="px-3 text-right font-semibold">{money(c.balance)}</td><td className="px-3 text-xs text-slate-500">{c.orders.map((o) => `N° ${o.order_number} (${fmtDate(o.order_date)})`).join(', ')}</td></tr>
@@ -196,6 +209,7 @@ export default function ReportsTab() {
                     {coll.customers.length === 0 && <tr><td colSpan={7} className="px-3 py-8 text-center text-slate-400">No hay saldos por cobrar.</td></tr>}
                   </tbody>
                 </table>
+              <PaginationBar {...debtP.barProps} itemLabel="clientes" />
               </div>
             </div>
           )}
@@ -207,13 +221,14 @@ export default function ReportsTab() {
                 <table className="w-full text-sm">
                   <thead><tr className="border-b border-slate-200 bg-slate-50"><th className={TH}>Producto</th><th className={TH + ' text-right'}>Stock</th><th className={TH + ' text-right'}>Consumo/mes</th><th className={TH + ' text-right'}>Cobertura</th><th className={TH + ' text-right'}>Objetivo</th><th className={TH + ' text-right'}>Reponer</th><th className={TH}>Urgencia</th></tr></thead>
                   <tbody className="divide-y divide-slate-100">
-                    {rep.map((r) => (
+                    {repP.rows.map((r) => (
                       <tr key={r.product_id}><td className="px-3 py-1.5 font-medium">{r.code}</td><td className="px-3 text-right">{r.stock}</td><td className="px-3 text-right">{r.monthly_avg}{r.months_of_data === 0 && <span className="text-xs text-slate-400"> sin historial</span>}</td>
                         <td className="px-3 text-right">{r.cover_days != null ? `${r.cover_days} d` : '—'}</td><td className="px-3 text-right">{r.target}</td><td className="px-3 text-right font-semibold">{r.suggested || '—'}</td>
                         <td className="px-3"><span className={`text-xs rounded-full border px-2 py-0.5 ${r.urgency === 'alta' ? 'bg-red-50 text-red-700 border-red-200' : r.urgency === 'media' ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>{r.urgency === 'ok' ? 'Suficiente' : r.urgency === 'alta' ? 'Urgente' : 'Pronto'}</span></td></tr>
                     ))}
                   </tbody>
                 </table>
+                <PaginationBar {...repP.barProps} itemLabel="productos" />
               </div>
             </div>
           )}
@@ -250,10 +265,11 @@ export default function ReportsTab() {
                 <table className="w-full text-sm">
                   <thead><tr className="border-b border-slate-200 bg-slate-50"><th className={TH}>Mes</th><th className={TH}>Cerrado</th><th className={TH + ' text-right'}>Productos</th><th /></tr></thead>
                   <tbody className="divide-y divide-slate-100">
-                    {closed.map((c) => <tr key={c.period}><td className="px-3 py-2 font-medium">{c.period}</td><td className="px-3 text-slate-500">{formatDateTime(c.closed_at)}</td><td className="px-3 text-right">{c.products}</td><td className="px-3 text-right">{canClose && <button type="button" className={BTN_SECONDARY} onClick={() => void reopen(c.period)}><Unlock size={12} /> Reabrir</button>}</td></tr>)}
+                    {closedP.rows.map((c) => <tr key={c.period}><td className="px-3 py-2 font-medium">{c.period}</td><td className="px-3 text-slate-500">{formatDateTime(c.closed_at)}</td><td className="px-3 text-right">{c.products}</td><td className="px-3 text-right">{canClose && <button type="button" className={BTN_SECONDARY} onClick={() => void reopen(c.period)}><Unlock size={12} /> Reabrir</button>}</td></tr>)}
                     {closed.length === 0 && <tr><td colSpan={4} className="px-3 py-8 text-center text-slate-400">Aún no hay meses cerrados.</td></tr>}
                   </tbody>
                 </table>
+                <PaginationBar {...closedP.barProps} itemLabel="meses" />
               </div>
             </div>
           )}

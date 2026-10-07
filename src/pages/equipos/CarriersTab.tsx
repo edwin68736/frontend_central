@@ -5,6 +5,7 @@ import Modal from '@/components/ui/Modal'
 import Spinner from '@/components/ui/Spinner'
 import { useAuth } from '@/contexts/AuthContext'
 import { equiposService, type EquipCarrier, type EquipCarrierInput } from '@/services/equipos.service'
+import { useConfirm } from './ConfirmProvider'
 import { ActiveBadge, apiError, BTN_PRIMARY, BTN_SECONDARY, DAYS, formatDays, INPUT, LABEL } from './common'
 
 const EMPTY: EquipCarrierInput = {
@@ -19,6 +20,7 @@ export default function CarriersTab() {
   const [loading, setLoading] = useState(true)
   const [form, setForm] = useState<{ open: boolean; id?: number; data: EquipCarrierInput }>({ open: false, data: EMPTY })
   const [saving, setSaving] = useState(false)
+  const confirm = useConfirm()
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -56,6 +58,7 @@ export default function CarriersTab() {
   const save = async () => {
     const d = form.data
     if (!d.code.trim() || !d.name.trim()) return toast.error('Código y nombre son obligatorios')
+    if (!(await confirm({ title: form.id ? 'Guardar cambios del transportista' : 'Crear transportista', message: `${d.name.trim()} · plazo de recojo ${d.pickup_days} días`, confirmLabel: 'Guardar' }))) return
     setSaving(true)
     try {
       if (form.id) await equiposService.updateCarrier(form.id, d)

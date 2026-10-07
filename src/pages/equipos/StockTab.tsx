@@ -12,6 +12,10 @@ import {
   type EquipStockRow,
   type MovementKind,
 } from '@/services/equipos.service'
+import PaginationBar from '@/components/ui/PaginationBar'
+import SearchSelect from '@/components/ui/SearchSelect'
+import { useConfirm } from './ConfirmProvider'
+import { useDebounced, usePaging } from './hooks'
 import { apiError, BTN_PRIMARY, BTN_SECONDARY, currentPeriod, formatDateTime, INPUT, LABEL, SemaphoreBadge } from './common'
 
 const MOVEMENT_LABEL: Record<string, string> = {
@@ -44,6 +48,8 @@ export default function StockTab() {
     open: false, productId: '', type: 'ingreso', qty: '', date: '', note: '', cost: '',
   })
   const [saving, setSaving] = useState(false)
+  const confirm = useConfirm()
+  const dq = useDebounced(q, 450)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -62,14 +68,16 @@ export default function StockTab() {
   }, [load])
 
   const filtered = useMemo(() => {
-    const term = q.trim().toLowerCase()
+    const term = dq.trim().toLowerCase()
     return rows.filter(
       (r) =>
         (!term || r.code.toLowerCase().includes(term) || r.name.toLowerCase().includes(term)) &&
         (!kind || r.kind === kind) &&
         (!onlyLow || r.semaphore === 'bajo'),
     )
-  }, [rows, q, kind, onlyLow])
+  }, [rows, dq, kind, onlyLow])
+  const stockP = usePaging(filtered, 25)
+  const movesP = usePaging(moves, 25)
 
   const totals = useMemo(
     () =>
@@ -114,6 +122,15 @@ export default function StockTab() {
     if (!Number.isInteger(qty) || qty === 0) return toast.error('La cantidad debe ser un entero distinto de cero')
     if (form.type !== 'ajuste' && qty < 0) return toast.error('Ingresa la cantidad en positivo')
     if (!form.note.trim()) return toast.error('La nota es obligatoria (ej. «Reposición 2026-09-03»)')
+    const prod = rows.find((r) => r.product_id === Number(form.productId))
+    const sensitive = form.type === 'ajuste' || form.type === 'baja'
+    const verb = { ingreso: 'un ingreso de', ajuste: 'un ajuste de', baja: 'una baja de', apertura: 'un stock inicial de' }[form.type]
+    const ok = await confirm({
+      title: 'Registrar movimiento de stock',
+      message: `Se registrará ${verb} ${qty} unidad(es) de ${prod?.code ?? 'producto'}.${sensitive ? ' Los ajustes y bajas requieren tu PIN.' : ''}`,
+      pin: sensitive, danger: form.type === 'baja', confirmLabel: 'Registrar',
+    })
+    if (!ok) return
     setSaving(true)
     try {
       await equiposService.addMovement({
@@ -123,7 +140,7 @@ export default function StockTab() {
         occurred_at: form.date ? new Date(`${form.date}T12:00:00`).toISOString() : undefined,
         note: form.note.trim(),
         unit_cost: form.type === 'ingreso' && form.cost !== '' ? Number(form.cost) : undefined,
-      })
+      }, ok.pin || undefined)
       toast.success('Movimiento registrado')
       setForm((f) => ({ ...f, open: false }))
       void load()
@@ -199,7 +216,7 @@ export default function StockTab() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 tabular-nums">
-                {filtered.map((r) => (
+                {stockP.rows.map((r) => (
                   <tr key={r.product_id} className="hover:bg-slate-50/70">
                     <td className="px-3 py-2">
                       <p className="font-medium text-slate-800">{r.code}</p>
@@ -248,6 +265,7 @@ export default function StockTab() {
             </table>
           </div>
         )}
+        {filtered.length > 0 && <PaginationBar {...stockP.barProps} itemLabel="productos" />}
       </section>
       <p className="text-xs text-slate-400">
         El stock sale del kardex de cada producto (no de fórmulas): inicial + ingresos + reingresos + ajustes − salidas = stock actual (al cierre del mes elegido). Las salidas
@@ -280,7 +298,7 @@ export default function StockTab() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {moves.map((m) => (
+                    {movesP.rows.map((m) => (
                       <tr key={m.id}>
                         <td className="px-3 py-1.5 whitespace-nowrap text-slate-600">{formatDateTime(m.occurred_at)}</td>
                         <td className="px-3 py-1.5">{MOVEMENT_LABEL[m.movement_type] ?? m.movement_type}</td>
@@ -300,6 +318,7 @@ export default function StockTab() {
                 </table>
               </div>
             )}
+            {!movesLoading && moves.length > 0 && <PaginationBar {...movesP.barProps} itemLabel="movimientos" />}
           </div>
         )}
       </Modal>
@@ -308,10 +327,9 @@ export default function StockTab() {
         <div className="space-y-3">
           <div>
             <label className={LABEL}>Producto *</label>
-            <select value={form.productId} onChange={(e) => setForm((f) => ({ ...f, productId: e.target.value ? Number(e.target.value) : '' }))} className={INPUT}>
-              <option value="">Selecciona…</option>
-              {rows.map((r) => <option key={r.product_id} value={r.product_id}>{r.code}</option>)}
-            </select>
+            <SearchSelect value={form.productId === '' ? null : form.productId} placeholder="Selecciona…" searchPlaceholder="Buscar producto…"
+              options={rows.map((r) => ({ value: r.product_id, label: r.code, hint: r.name !== r.code ? r.name : undefined }))}
+              onChange={(v) => setForm((f) => ({ ...f, productId: v ? Number(v) : '' }))} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>

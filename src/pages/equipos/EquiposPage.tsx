@@ -4,6 +4,7 @@ import { Banknote, BarChart3, Boxes, ClipboardList, LayoutDashboard, Layers, Pac
 import Spinner from '@/components/ui/Spinner'
 import Forbidden from '@/components/auth/Forbidden'
 import { useAuth } from '@/contexts/AuthContext'
+import { ConfirmProvider } from './ConfirmProvider'
 
 const DashboardTab = lazy(() => import('./DashboardTab'))
 const ReturnsTab = lazy(() => import('./ReturnsTab'))
@@ -44,6 +45,7 @@ export default function EquiposPage() {
   const Active = active.Component
 
   return (
+    <ConfirmProvider>
     <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-bold text-slate-800">Equipos</h1>
@@ -72,5 +74,6 @@ export default function EquiposPage() {
         <Active />
       </Suspense>
     </div>
+    </ConfirmProvider>
   )
 }

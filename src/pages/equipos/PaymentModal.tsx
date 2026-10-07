@@ -6,6 +6,7 @@ import {
 } from '@/services/equiposOrders.service'
 import { apiError, BTN_PRIMARY, BTN_SECONDARY, INPUT, LABEL } from './common'
 import { money, todayISO } from './ordersCommon'
+import { useConfirm } from './ConfirmProvider'
 
 interface Props {
   open: boolean
@@ -33,6 +34,7 @@ export default function PaymentModal({ open, onClose, onSaved, customerId, custo
   const [notes, setNotes] = useState('')
   const [apply, setApply] = useState<Record<number, string>>({})
   const [saving, setSaving] = useState(false)
+  const confirm = useConfirm()
 
   useEffect(() => {
     if (!open) return
@@ -76,6 +78,7 @@ export default function PaymentModal({ open, onClose, onSaved, customerId, custo
       customer_id: customerId, amount: total, paid_at: paidAt, method, moment, reference: reference.trim(),
       invoice: invoice.trim().toUpperCase(), notes: notes.trim(), allocations, auto_allocate: false,
     }
+    if (!(await confirm({ title: 'Registrar cobro', message: `Se registrará un cobro de ${money(total)} (${METHOD_LABEL[method]}) a nombre de ${customerName}${applied > 0 ? `, aplicado ${money(applied)} a sus pedidos` : ''}.`, confirmLabel: 'Registrar cobro' }))) return
     setSaving(true)
     try {
       await equiposOrders.createPayment(body)
