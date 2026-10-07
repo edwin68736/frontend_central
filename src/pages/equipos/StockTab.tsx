@@ -40,8 +40,8 @@ export default function StockTab() {
   const [moves, setMoves] = useState<EquipMovement[]>([])
   const [movesLoading, setMovesLoading] = useState(false)
 
-  const [form, setForm] = useState<{ open: boolean; productId: number | ''; type: MovementKind; qty: string; date: string; note: string }>({
-    open: false, productId: '', type: 'ingreso', qty: '', date: '', note: '',
+  const [form, setForm] = useState<{ open: boolean; productId: number | ''; type: MovementKind; qty: string; date: string; note: string; cost: string }>({
+    open: false, productId: '', type: 'ingreso', qty: '', date: '', note: '', cost: '',
   })
   const [saving, setSaving] = useState(false)
 
@@ -106,7 +106,7 @@ export default function StockTab() {
   }
 
   const openForm = (type: MovementKind, productId?: number) =>
-    setForm({ open: true, productId: productId ?? '', type, qty: '', date: '', note: '' })
+    setForm({ open: true, productId: productId ?? '', type, qty: '', date: '', note: '', cost: '' })
 
   const submit = async () => {
     const qty = Number(form.qty)
@@ -122,6 +122,7 @@ export default function StockTab() {
         quantity: qty,
         occurred_at: form.date ? new Date(`${form.date}T12:00:00`).toISOString() : undefined,
         note: form.note.trim(),
+        unit_cost: form.type === 'ingreso' && form.cost !== '' ? Number(form.cost) : undefined,
       })
       toast.success('Movimiento registrado')
       setForm((f) => ({ ...f, open: false }))
@@ -322,6 +323,12 @@ export default function StockTab() {
               <input type="date" value={form.date} onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))} className={INPUT} />
             </div>
           </div>
+          {form.type === 'ingreso' && (
+            <div>
+              <label className={LABEL}>Costo unitario de compra (opcional)</label>
+              <input type="number" min={0} step="0.01" value={form.cost} onChange={(e) => setForm((f) => ({ ...f, cost: e.target.value }))} placeholder="Para calcular la utilidad" className={INPUT} />
+            </div>
+          )}
           <div>
             <label className={LABEL}>Nota * <span className="text-slate-400 font-normal">(queda en el kardex y en auditoría)</span></label>
             <input value={form.note} onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))} placeholder="Ej. Reposición 2026-09-03" className={INPUT} />

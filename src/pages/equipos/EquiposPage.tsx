@@ -1,10 +1,13 @@
 import { Suspense, lazy } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Banknote, Boxes, ClipboardList, Layers, PackageCheck, Settings2, Truck, Upload } from 'lucide-react'
+import { Banknote, BarChart3, Boxes, ClipboardList, LayoutDashboard, Layers, PackageCheck, RotateCcw, Settings2, Truck, Upload } from 'lucide-react'
 import Spinner from '@/components/ui/Spinner'
 import Forbidden from '@/components/auth/Forbidden'
 import { useAuth } from '@/contexts/AuthContext'
 
+const DashboardTab = lazy(() => import('./DashboardTab'))
+const ReturnsTab = lazy(() => import('./ReturnsTab'))
+const ReportsTab = lazy(() => import('./ReportsTab'))
 const OrdersTab = lazy(() => import('./OrdersTab'))
 const ShipmentsTab = lazy(() => import('./ShipmentsTab'))
 const PaymentsTab = lazy(() => import('./PaymentsTab'))
@@ -15,9 +18,12 @@ const ImportTab = lazy(() => import('./ImportTab'))
 const SettingsTab = lazy(() => import('./SettingsTab'))
 
 const TABS = [
+  { key: 'panel', label: 'Panel', icon: LayoutDashboard, permission: 'equipos.view', Component: DashboardTab },
   { key: 'pedidos', label: 'Pedidos', icon: ClipboardList, permission: 'equipos.view', Component: OrdersTab },
   { key: 'envios', label: 'Envíos', icon: PackageCheck, permission: 'equipos.view', Component: ShipmentsTab },
   { key: 'cobros', label: 'Cobros y clientes', icon: Banknote, permission: 'equipos.payments_view', Component: PaymentsTab },
+  { key: 'retornos', label: 'Retornos', icon: RotateCcw, permission: 'equipos.view', Component: ReturnsTab },
+  { key: 'reportes', label: 'Reportes', icon: BarChart3, permission: 'equipos.reports', Component: ReportsTab },
   { key: 'stock', label: 'Stock', icon: Boxes, permission: 'equipos.stock_view', Component: StockTab },
   { key: 'catalogo', label: 'Catálogo', icon: Layers, permission: 'equipos.view', Component: CatalogTab },
   { key: 'transportistas', label: 'Transportistas', icon: Truck, permission: 'equipos.view', Component: CarriersTab },

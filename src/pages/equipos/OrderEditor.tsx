@@ -42,7 +42,7 @@ function fromView(o: OrderView): OrderInput {
           carrier_id: o.shipment.carrier_id, guide_number: o.shipment.guide_number, destination_agency: o.shipment.destination_agency,
           destination_department: o.shipment.destination_department, destination_province: o.shipment.destination_province,
           destination_district: o.shipment.destination_district, delivery_mode: o.shipment.delivery_mode,
-          scheduled_dispatch_date: toDateInput(o.shipment.scheduled_dispatch_date), notes: o.shipment.notes,
+          scheduled_dispatch_date: toDateInput(o.shipment.scheduled_dispatch_date), notes: o.shipment.notes, freight_cost: o.shipment.freight_cost,
         }
       : null,
   }
@@ -388,6 +388,7 @@ export default function OrderEditor({ open, onClose, orderId, onSaved }: Props) 
               <div><label className={LABEL}>Distrito</label><input value={form.shipment?.destination_district ?? ''} onChange={(e) => setShip({ destination_district: e.target.value })} className={INPUT} /></div>
               <div><label className={LABEL}>Agencia / dirección de destino</label><input value={form.shipment?.destination_agency ?? ''} onChange={(e) => setShip({ destination_agency: e.target.value })} className={INPUT} /></div>
               <div><label className={LABEL}>{carrier?.guide_label || 'N° de guía'} (opcional ahora)</label><input value={form.shipment?.guide_number ?? ''} onChange={(e) => setShip({ guide_number: e.target.value.trim() })} className={INPUT} /></div>
+              <div><label className={LABEL}>Costo del flete (opcional)</label><input type="number" min={0} step="0.01" value={form.shipment?.freight_cost ?? ''} onChange={(e) => setShip({ freight_cost: e.target.value === '' ? null : Number(e.target.value) })} className={INPUT} /></div>
               <div><label className={LABEL}>Despacho programado</label><input type="date" value={form.shipment?.scheduled_dispatch_date ?? ''} onChange={(e) => setShip({ scheduled_dispatch_date: e.target.value })} className={INPUT} /></div>
             </div>
             {carrier && form.shipment?.scheduled_dispatch_date && carrier.dispatch_days && (() => {

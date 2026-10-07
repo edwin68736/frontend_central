@@ -66,6 +66,7 @@ export interface ShipmentInput {
   delivery_mode: DeliveryMode
   scheduled_dispatch_date: string
   notes: string
+  freight_cost?: number | null
 }
 
 export interface OrderInput {
@@ -138,6 +139,7 @@ export interface ShipmentView {
   pickup_deadline: string | null
   picked_up_at: string | null
   label_printed_at: string | null
+  freight_cost: number
   status: string
   notes: string
   carrier_name: string

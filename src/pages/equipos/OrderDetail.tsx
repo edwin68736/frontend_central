@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { AlertTriangle, Ban, Banknote, CheckCircle2, ExternalLink, Pencil, Printer, Truck } from 'lucide-react'
+import { AlertTriangle, Ban, Banknote, CheckCircle2, ExternalLink, MessageCircle, Pencil, Printer, RotateCcw, Truck } from 'lucide-react'
 import Modal from '@/components/ui/Modal'
 import Spinner from '@/components/ui/Spinner'
 import { useAuth } from '@/contexts/AuthContext'
@@ -11,6 +11,8 @@ import { apiError, BTN_PRIMARY, BTN_SECONDARY, formatDateTime, INPUT } from './c
 import { AlertBadge, fmtDate, money, PaymentBadge, ShipmentBadge, StatusBadge, ValidationBadge } from './ordersCommon'
 import { buildShippingLabel, openLabel, type LabelFormat } from './shippingLabel'
 import PaymentModal from './PaymentModal'
+import { equiposControl } from '@/services/equiposControl.service'
+import { waLink, waText, WA_LABEL, type WaKind } from './whatsapp'
 
 interface Props {
   orderId: number | null
@@ -28,6 +30,8 @@ export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Pro
   const [payOpen, setPayOpen] = useState(false)
   const [prompt, setPrompt] = useState<Prompt>(null)
   const [promptText, setPromptText] = useState('')
+  const [retOpen, setRetOpen] = useState(false)
+  const [ret, setRet] = useState({ cost: '0', condition: 'buen_estado' as 'buen_estado' | 'danado', notes: '' })
   const [labelFormat, setLabelFormat] = useState<LabelFormat>('thermal')
 
   const can = (p: string) => hasPermission(p)
@@ -73,7 +77,28 @@ export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Pro
     try { await equiposOrders.labelPrinted(o.id); void load(); onChanged() } catch { /* no crítico */ }
   }
 
+  const saveReturn = async () => {
+    if (!o) return
+    setBusy(true)
+    try {
+      await equiposControl.createReturn({ order_id: o.id, return_cost: Number(ret.cost) || 0, condition: ret.condition, notes: ret.notes })
+      toast.success('Retorno registrado')
+      setRetOpen(false)
+      void load()
+      onChanged()
+    } catch (e) {
+      toast.error(apiError(e, 'No se pudo registrar el retorno'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const sh = o?.shipment ?? null
+  const waKinds: WaKind[] = !o || !sh ? [] : [
+    ...(sh.status === 'en_transito' ? (['despachado'] as WaKind[]) : []),
+    ...(sh.status === 'en_agencia' ? (['llego', 'recordatorio', 'vence_pronto'] as WaKind[]) : []),
+    ...(o.balance_amount > 0 && o.payments != null && o.status === 'registrado' ? (['saldo'] as WaKind[]) : []),
+  ]
   const paymentsVisible = o?.payments != null
   const isOpen = o && o.status !== 'anulado'
 
@@ -227,6 +252,13 @@ export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Pro
                   <button type="button" className={BTN_SECONDARY} onClick={() => void printLabel()}><Printer size={13} /> Rótulo{sh.label_printed_at ? ' (reimprimir)' : ''}</button>
                 </span>
               )}
+              {sh && (sh.status === 'en_transito' || sh.status === 'en_agencia') && o.status === 'registrado' && can('equipos.returns') && (
+                <button type="button" className={BTN_SECONDARY} onClick={() => setRetOpen(true)}><RotateCcw size={13} /> Registrar retorno</button>
+              )}
+              {o.customer_phone && waKinds.map((k) => {
+                const link = waLink(o.customer_phone, waText(k, { customer: o.customer_name, orderNumber: o.order_number, carrier: sh?.carrier_name, guide: sh?.guide_number, guideLabel: sh?.guide_label, agency: sh?.destination_agency, deadline: sh?.pickup_deadline ? fmtDate(sh.pickup_deadline) : undefined, balance: o.balance_amount }))
+                return link ? <a key={k} href={link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100"><MessageCircle size={13} /> {WA_LABEL[k]}</a> : null
+              })}
               {isOpen && can('equipos.cancel') && (
                 <button type="button" className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-red-700 bg-red-50 hover:bg-red-100" disabled={busy}
                   onClick={() => ask({ title: 'Anular pedido', label: 'Motivo de la anulación', required: true, confirmLabel: 'Anular pedido', run: async (t) => act(() => equiposOrders.cancelOrder(o.id, t), 'Pedido anulado') })}>
@@ -242,6 +274,18 @@ export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Pro
         open={payOpen} onClose={() => setPayOpen(false)} onSaved={() => { void load(); onChanged() }}
         customerId={o?.customer_id ?? null} customerName={o?.customer_name ?? ''} orderId={o?.id} suggestedAmount={o && o.balance_amount > 0 ? o.balance_amount : undefined}
       />
+
+      <Modal open={retOpen} onClose={() => setRetOpen(false)} title="Registrar retorno">
+        <div className="space-y-3">
+          <p className="text-sm text-slate-600">Se devuelve todo el pedido; el envío pasa a «en retorno». Al recibirlo en buen estado, los equipos vuelven al stock (Retornos).</p>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className="block text-sm font-medium text-slate-700 mb-1">Condición</label><select value={ret.condition} onChange={(e) => setRet({ ...ret, condition: e.target.value as 'buen_estado' | 'danado' })} className={INPUT}><option value="buen_estado">Buen estado</option><option value="danado">Dañado</option></select></div>
+            <div><label className="block text-sm font-medium text-slate-700 mb-1">Costo del retorno</label><input type="number" min={0} step="0.01" value={ret.cost} onChange={(e) => setRet({ ...ret, cost: e.target.value })} className={INPUT} /></div>
+          </div>
+          <input value={ret.notes} onChange={(e) => setRet({ ...ret, notes: e.target.value })} placeholder="Observaciones" className={INPUT} />
+          <div className="flex justify-end gap-2"><button type="button" className={BTN_SECONDARY} onClick={() => setRetOpen(false)}>Cancelar</button><button type="button" className={BTN_PRIMARY} disabled={busy} onClick={() => void saveReturn()}>Registrar</button></div>
+        </div>
+      </Modal>
 
       <Modal open={prompt != null} onClose={() => setPrompt(null)} title={prompt?.title ?? ''}>
         <div className="space-y-3">

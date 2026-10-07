@@ -123,6 +123,7 @@ export interface EquipMovementInput {
   quantity: number
   occurred_at?: string
   note: string
+  unit_cost?: number
 }
 
 export interface ImportIssue {

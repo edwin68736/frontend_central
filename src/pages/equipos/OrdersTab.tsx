@@ -72,6 +72,13 @@ export default function OrdersTab() {
         {canCreate && <button type="button" className={BTN_PRIMARY} onClick={() => setEditor({ open: true })}><Plus size={16} /> Nuevo pedido</button>}
       </div>
 
+      <div className="flex gap-2">
+        {[{ k: 'pendiente_validacion', l: 'Por validar' }, { k: 'observado', l: 'Observados' }].map((c) => (
+          <button key={c.k} type="button" aria-pressed={filter.validation_status === c.k} onClick={() => setF({ validation_status: filter.validation_status === c.k ? undefined : c.k, status: filter.validation_status === c.k ? undefined : 'registrado' })}
+            className={`px-3 py-1 rounded-full text-xs border ${filter.validation_status === c.k ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}>{c.l}</button>
+        ))}
+      </div>
+
       {data && canSeeMoney && (
         <p className="text-sm text-slate-500">
           {data.total} pedidos · Vendido <span className="font-semibold text-slate-700">{money(data.sum_total)}</span> · Por cobrar <span className="font-semibold text-red-700">{money(data.sum_balance)}</span>
