@@ -76,6 +76,8 @@ export default function StockTab() {
       filtered.reduce(
         (a, r) => ({
           opening: a.opening + r.opening,
+          ing: a.ing + r.ingresos,
+          adj: a.adj + r.adjustments,
           di: a.di + r.direct_independiente,
           dp: a.dp + r.direct_promo_tk,
           ci: a.ci + r.combo_independiente,
@@ -84,7 +86,7 @@ export default function StockTab() {
           re: a.re + r.reingresos,
           cur: a.cur + r.current,
         }),
-        { opening: 0, di: 0, dp: 0, ci: 0, cp: 0, out: 0, re: 0, cur: 0 },
+        { opening: 0, ing: 0, adj: 0, di: 0, dp: 0, ci: 0, cp: 0, out: 0, re: 0, cur: 0 },
       ),
     [filtered],
   )
@@ -178,10 +180,12 @@ export default function StockTab() {
                 <tr>
                   <th rowSpan={2} className="px-3 py-2 text-left">Producto</th>
                   <th rowSpan={2} className="px-3 py-2 text-right">Inicial</th>
+                  <th rowSpan={2} className="px-3 py-2 text-right" title="Reposiciones del mes">Ingresos</th>
                   <th colSpan={2} className="px-3 py-1 text-center border-l border-slate-200">Salidas directas</th>
                   <th colSpan={2} className="px-3 py-1 text-center border-l border-slate-200">Salidas por combos</th>
                   <th rowSpan={2} className="px-3 py-2 text-right border-l border-slate-200">Total sal.</th>
                   <th rowSpan={2} className="px-3 py-2 text-right">Reingr.</th>
+                  <th rowSpan={2} className="px-3 py-2 text-right" title="Ajustes y bajas del mes (con signo)">Ajustes</th>
                   <th rowSpan={2} className="px-3 py-2 text-right border-l border-slate-200">Stock actual</th>
                   <th rowSpan={2} className="px-3 py-2 text-center">Semáforo</th>
                   <th rowSpan={2} className="px-3 py-2" />
@@ -201,12 +205,14 @@ export default function StockTab() {
                       <p className="text-xs text-slate-400">{EQUIP_KIND_LABEL[r.kind]} · umbrales {r.yellow_threshold}/{r.green_threshold}</p>
                     </td>
                     <td className="px-3 py-2 text-right">{num(r.opening)}</td>
+                    <td className="px-3 py-2 text-right text-emerald-700">{num(r.ingresos)}</td>
                     <td className="px-3 py-2 text-right border-l border-slate-100">{num(r.direct_independiente)}</td>
                     <td className="px-3 py-2 text-right">{num(r.direct_promo_tk)}</td>
                     <td className="px-3 py-2 text-right border-l border-slate-100">{num(r.combo_independiente)}</td>
                     <td className="px-3 py-2 text-right">{num(r.combo_promo_tk)}</td>
                     <td className="px-3 py-2 text-right font-medium border-l border-slate-100">{num(r.total_out)}</td>
                     <td className="px-3 py-2 text-right">{num(r.reingresos)}</td>
+                    <td className="px-3 py-2 text-right">{num(r.adjustments)}</td>
                     <td className={`px-3 py-2 text-right font-semibold border-l border-slate-100 ${r.current < 0 ? 'text-red-600' : 'text-slate-800'}`}>{r.current}</td>
                     <td className="px-3 py-2 text-center"><SemaphoreBadge value={r.semaphore} /></td>
                     <td className="px-3 py-2 text-right whitespace-nowrap">
@@ -217,7 +223,7 @@ export default function StockTab() {
                   </tr>
                 ))}
                 {filtered.length === 0 && (
-                  <tr><td colSpan={11} className="px-4 py-12 text-center text-slate-400">No hay productos para mostrar</td></tr>
+                  <tr><td colSpan={13} className="px-4 py-12 text-center text-slate-400">No hay productos para mostrar</td></tr>
                 )}
               </tbody>
               {filtered.length > 0 && (
@@ -225,12 +231,14 @@ export default function StockTab() {
                   <tr>
                     <td className="px-3 py-2">Totales ({filtered.length})</td>
                     <td className="px-3 py-2 text-right">{totals.opening}</td>
+                    <td className="px-3 py-2 text-right">{totals.ing}</td>
                     <td className="px-3 py-2 text-right border-l border-slate-200">{totals.di}</td>
                     <td className="px-3 py-2 text-right">{totals.dp}</td>
                     <td className="px-3 py-2 text-right border-l border-slate-200">{totals.ci}</td>
                     <td className="px-3 py-2 text-right">{totals.cp}</td>
                     <td className="px-3 py-2 text-right border-l border-slate-200">{totals.out}</td>
                     <td className="px-3 py-2 text-right">{totals.re}</td>
+                    <td className="px-3 py-2 text-right">{totals.adj}</td>
                     <td className="px-3 py-2 text-right border-l border-slate-200">{totals.cur}</td>
                     <td colSpan={2} />
                   </tr>
@@ -241,8 +249,8 @@ export default function StockTab() {
         )}
       </section>
       <p className="text-xs text-slate-400">
-        El stock sale del kardex de cada producto (no de fórmulas): inicial del mes, salidas por pedidos y combos separadas por tipo de salida, reingresos por retornos,
-        ingresos y ajustes con su nota. El «Stock actual» es el del cierre del mes elegido.
+        El stock sale del kardex de cada producto (no de fórmulas): inicial + ingresos + reingresos + ajustes − salidas = stock actual (al cierre del mes elegido). Las salidas
+        vienen de los pedidos y de los componentes de los combos, separadas por tipo de salida.
       </p>
 
       <Modal open={!!kardex} onClose={() => setKardex(null)} title={kardex ? `Kardex — ${kardex.code}` : ''} maxWidth="max-w-3xl">

@@ -43,13 +43,15 @@ export default function CarriersTab() {
     })
 
   const selectedDays = new Set(form.data.dispatch_days.split(',').map((d) => d.trim()).filter(Boolean))
-  const toggleDay = (value: number) => {
-    const next = new Set(selectedDays)
-    const k = String(value)
-    if (next.has(k)) next.delete(k)
-    else next.add(k)
-    setForm((f) => ({ ...f, data: { ...f.data, dispatch_days: [...next].sort().join(',') } }))
-  }
+  // Se calcula sobre el estado más reciente (no sobre el render anterior) para que dos clics seguidos no se pisen.
+  const toggleDay = (value: number) =>
+    setForm((f) => {
+      const next = new Set(f.data.dispatch_days.split(',').map((d) => d.trim()).filter(Boolean))
+      const k = String(value)
+      if (next.has(k)) next.delete(k)
+      else next.add(k)
+      return { ...f, data: { ...f.data, dispatch_days: [...next].sort().join(',') } }
+    })
 
   const save = async () => {
     const d = form.data
