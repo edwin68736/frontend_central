@@ -202,7 +202,7 @@ export default function PaymentsTab() {
                 {customers.length === 0 && <li className="text-center text-sm text-slate-400 py-8">Sin clientes.</li>}
               </ul>
             )}
-            <PaginationBar page={custPage} perPage={custPer} total={custTotal} totalPages={Math.max(1, Math.ceil(custTotal / custPer))} onPageChange={setCustPage} onPerPageChange={(n) => { setCustPer(n); setCustPage(1) }} itemLabel="clientes" />
+            <PaginationBar page={custPage} perPage={custPer} total={custTotal} totalPages={Math.max(1, Math.ceil(custTotal / custPer))} onPageChange={setCustPage} onPerPageChange={(n) => { setCustPer(n); setCustPage(1) }} itemLabel="clientes" compact />
           </div>
 
           <div className="space-y-4">
