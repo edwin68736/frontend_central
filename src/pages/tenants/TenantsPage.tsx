@@ -278,6 +278,9 @@ function resolveTenantPlanValue(t: Tenant, plans: SaasPlan[]): string {
 }
 
 type CreateForm = z.infer<typeof createSchema>
+
+/** Meses de cortesía que se sugieren al elegir la suscripción de 12 meses. */
+const DEFAULT_BONUS_MONTHS_12 = 2
 type EditForm = z.infer<typeof editSchema>
 
 /* ─── component ────────────────────────────────────────────── */
@@ -609,7 +612,9 @@ export default function TenantsPage() {
   // Los meses de cortesía solo existen con 12 meses; con otra duración valen 0.
   const createBonus = Number(createMonths) === 12 ? Math.max(0, Number(createBonusRaw) || 0) : 0
   useEffect(() => {
-    if (Number(createMonths) !== 12 && Number(createBonusRaw) > 0) createForm.setValue('subscription_bonus_months', 0)
+    // Al elegir 12 meses se sugiere +2 de cortesía (política habitual); el admin puede cambiarlo o quitarlo.
+    // Con otra duración vuelve a 0.
+    createForm.setValue('subscription_bonus_months', Number(createMonths) === 12 ? DEFAULT_BONUS_MONTHS_12 : 0)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [createMonths])
   const createStartDate = createForm.watch('start_date')
