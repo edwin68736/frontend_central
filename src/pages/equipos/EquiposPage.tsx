@@ -47,7 +47,7 @@ export default function EquiposPage() {
   return (
     <ConfirmProvider>
     <div className="space-y-5">
-      <nav className="flex gap-1 border-b border-slate-200 overflow-x-auto" aria-label="Secciones de equipos">
+      <nav className="flex flex-wrap gap-x-1 border-b border-slate-200" aria-label="Secciones de equipos">
         {visible.map((t) => {
           const Icon = t.icon
           const on = t.key === active.key
