@@ -19,6 +19,7 @@ import DocumentPackagesPage from '@/pages/document-packages/DocumentPackagesPage
 import FleetMigrationsPage from '@/pages/migrations/FleetMigrationsPage'
 import FiscalDocumentsPage from '@/pages/fiscal/FiscalDocumentsPage'
 import OperacionesFiscalesPage from '@/pages/fiscal/OperacionesFiscalesPage'
+import EquiposPage from '@/pages/equipos/EquiposPage'
 import Spinner from '@/components/ui/Spinner'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -70,6 +71,7 @@ function AppRoutes() {
         <Route path="/fleet-migrations" element={<RequirePermission permission="migraciones.view"><FleetMigrationsPage /></RequirePermission>} />
         <Route path="/fiscal" element={<RequirePermission permission="fiscal.view"><FiscalDocumentsPage /></RequirePermission>} />
         <Route path="/fiscal-operations" element={<RequirePermission permission="fiscal.view"><OperacionesFiscalesPage /></RequirePermission>} />
+        <Route path="/equipos" element={<RequirePermission permission="equipos.view"><EquiposPage /></RequirePermission>} />
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />

@@ -21,6 +21,7 @@ import {
   FileStack,
   Activity,
   ShieldCheck,
+  Boxes,
 } from 'lucide-react'
 
 // Cada item declara el permiso que lo habilita (Fase 9 §4) — el sidebar se filtra con
@@ -39,6 +40,7 @@ const navItems = [
   { to: '/payments', label: 'Pagos', icon: Receipt, permission: 'pagos.view' },
   { to: '/saas-billing', label: 'Cobros SaaS', icon: CreditCard, permission: 'ajustes.view' },
   { to: '/document-packages', label: 'Paquetes docs', icon: FileCheck, permission: 'documentos.view' },
+  { to: '/equipos', label: 'Equipos', icon: Boxes, permission: 'equipos.view' },
   { to: '/users', label: 'Usuarios', icon: Users, permission: 'usuarios_central.view' },
   { to: '/roles', label: 'Roles', icon: ShieldCheck, permission: 'roles.view' },
   { to: '/settings', label: 'Configuración', icon: Settings, permission: 'ajustes.view' },
