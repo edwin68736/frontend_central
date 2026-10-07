@@ -26,48 +26,67 @@ function drawLabel(doc: jsPDF, o: OrderView, x: number, y: number) {
     return parts.length * size * 0.38
   }
 
-  // Cabecera
-  text(`PEDIDO N° ${o.order_number}`, x + pad, y + 7, 10, true)
+  // Cabecera: marca + número de pedido, y el transportista a la derecha
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(12)
+  doc.text('TUKIFAC', x + pad, y + 7.5)
+  const brandW = doc.getTextWidth('TUKIFAC')
+  doc.setFontSize(10)
+  doc.text(`|  PEDIDO N° ${o.order_number}`, x + pad + brandW + 2, y + 7.5)
+  doc.text((sh?.carrier_name ?? '').toUpperCase(), x + LABEL_W - pad, y + 7.5, { align: 'right' })
+  doc.setLineWidth(0.2)
+  doc.line(x + pad, y + 9.5, x + LABEL_W - pad, y + 9.5)
+
+  // Cada sección va en su propio recuadro
+  const lx = x + pad
+  const lw = colSplit - pad - 1
+  const rx0 = x + colSplit + 1
+  const rw0 = LABEL_W - pad - colSplit - 1
+  doc.setLineWidth(0.25)
+  doc.rect(lx, y + 11.5, lw, 17.5) // destinatario
+  doc.rect(lx, y + 30, lw, 16.5) // destino
+  doc.rect(rx0, y + 11.5, rw0, 17.5) // guía
+  doc.rect(rx0, y + 30, rw0, 16.5) // contenido
+
+  const tag = (t: string, tx: number, ty: number) => {
+    doc.setTextColor(110)
+    text(t, tx, ty, 6)
+    doc.setTextColor(0)
+  }
+  const ix = lx + 1.8
+  const iw = lw - 3.6
+
+  // Destinatario
+  tag('DESTINATARIO', ix, y + 14.7)
+  const name = o.customer_name.toUpperCase()
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(10)
-  doc.text((sh?.carrier_name ?? '').toUpperCase(), x + LABEL_W - pad, y + 7, { align: 'right' })
-  doc.setLineWidth(0.2)
-  doc.line(x + pad, y + 9, x + LABEL_W - pad, y + 9)
-
-  // Columna izquierda: destinatario y destino
-  let cy = y + 13.5
-  doc.setTextColor(110)
-  text('DESTINATARIO', x + pad, cy, 6)
-  doc.setTextColor(0)
-  cy += 4.2
-  cy += text(o.customer_name.toUpperCase(), x + pad, cy, 10, true, colSplit - pad - 2, 2) + 1.4
+  const oneLine = doc.getTextWidth(name) <= iw
+  if (oneLine) text(name, ix, y + 19.5, 10, true)
+  else text(name, ix, y + 18.8, 8.5, true, iw, 2)
   const ids = [o.customer_doc_type && o.customer_doc_number ? `${o.customer_doc_type}: ${o.customer_doc_number}` : '', o.customer_phone ? `Cel.: ${o.customer_phone}` : '']
     .filter(Boolean).join('   ')
-  if (ids) cy += text(ids, x + pad, cy, 8, false, colSplit - pad - 2, 1) + 1.4
-  doc.setTextColor(110)
-  text('DESTINO', x + pad, cy + 0.6, 6)
-  doc.setTextColor(0)
-  cy += 4.6
-  const place = [sh?.destination_district, sh?.destination_province, sh?.destination_department].filter(Boolean).join(' - ')
-  if (place) cy += text(place.toUpperCase(), x + pad, cy, 9, true, colSplit - pad - 2, 2) + 1
-  if (sh?.destination_agency) text(sh.destination_agency, x + pad, cy, 7.5, false, colSplit - pad - 2, 2)
+  if (ids) text(ids, ix, oneLine ? y + 24.6 : y + 26.6, 7.5, false, iw, 1)
 
-  // Columna derecha: guía, quién recoge y contenido
-  doc.setLineWidth(0.2)
-  doc.line(x + colSplit, y + 11, x + colSplit, y + 45)
-  const rx = x + colSplit + 3
-  const rw = LABEL_W - colSplit - pad - 3
-  doc.setTextColor(110)
-  text(sh?.guide_label ? sh.guide_label.toUpperCase() : 'GUÍA', rx, y + 13.5, 6)
-  doc.setTextColor(0)
-  text(sh?.guide_number || '—', rx, y + 18.5, 12, true, rw, 1)
-  if (sh) text(DELIVERY_MODE_LABEL[sh.delivery_mode] ?? sh.delivery_mode, rx, y + 22.5, 7, false, rw, 1)
-  if (o.contact_dni) text(`Recoge DNI ${o.contact_dni}`, rx, y + 26, 7, false, rw, 1)
-  doc.setTextColor(110)
-  text('CONTENIDO', rx, y + 30.5, 6)
-  doc.setTextColor(0)
+  // Destino
+  tag('DESTINO', ix, y + 33.2)
+  const place = [sh?.destination_district, sh?.destination_province, sh?.destination_department].filter(Boolean).join(' - ')
+  let py = y + 37.8
+  if (place) py += text(place.toUpperCase(), ix, py, 9, true, iw, 2) + 1.2
+  if (sh?.destination_agency) text(sh.destination_agency, ix, py + 2.2, 7.5, false, iw, 1)
+
+  // Guía y quién recoge
+  const gx = rx0 + 1.8
+  const gw = rw0 - 3.6
+  tag(sh?.guide_label ? sh.guide_label.toUpperCase() : 'GUÍA', gx, y + 14.7)
+  text(sh?.guide_number || '—', gx, y + 20.5, 12, true, gw, 1)
+  if (sh) text(DELIVERY_MODE_LABEL[sh.delivery_mode] ?? sh.delivery_mode, gx, y + 24.7, 7, false, gw, 1)
+  if (o.contact_dni) text(`Recoge DNI ${o.contact_dni}`, gx, y + 27.6, 7, false, gw, 1)
+
+  // Contenido
+  tag('CONTENIDO', gx, y + 33.2)
   const packing = (o.packing ?? []).map((p) => `${p.quantity} x ${p.code}`)
-  text(packing.length ? packing.join('\n') : '—', rx, y + 34.5, 8, false, rw, 3)
+  text(packing.length ? packing.join('\n') : '—', gx, y + 37.6, 8, false, gw, 3)
 
   // Saldo / pagado
   const bh = 9
