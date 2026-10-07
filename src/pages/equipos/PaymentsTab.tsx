@@ -296,11 +296,11 @@ export default function PaymentsTab() {
 
       <Modal open={form.open} onClose={() => setForm({ open: false, data: EMPTY_CUSTOMER })} title={form.id ? 'Editar cliente' : 'Nuevo cliente'}>
         <div className="space-y-3">
-          <div><label className={LABEL}>Nombre / razón social *</label><input value={form.data.name} onChange={(e) => setForm((f) => ({ ...f, data: { ...f.data, name: e.target.value } }))} className={INPUT} /></div>
           <div className="grid grid-cols-2 gap-3">
             <div><label className={LABEL}>Tipo de documento</label>
               <select value={form.data.doc_type} onChange={(e) => setForm((f) => ({ ...f, data: { ...f.data, doc_type: e.target.value } }))} className={INPUT}><option value="DNI">DNI</option><option value="RUC">RUC</option><option value="CE">C. extranjería</option></select></div>
             <div><label className={LABEL}>N° de documento *</label><div className="flex gap-1"><input value={form.data.doc_number} onChange={(e) => setForm((f) => ({ ...f, data: { ...f.data, doc_number: e.target.value.trim() } }))} className={INPUT} />{(form.data.doc_type === 'DNI' || form.data.doc_type === 'RUC') && <button type="button" className={BTN_SECONDARY} disabled={looking || !form.data.doc_number} onClick={() => void lookupDoc(false)}>{looking ? '…' : 'Consultar'}</button>}</div></div>
+          <div className="col-span-2"><label className={LABEL}>Nombre / razón social *</label><input value={form.data.name} onChange={(e) => setForm((f) => ({ ...f, data: { ...f.data, name: e.target.value } }))} className={INPUT} /></div>
             <div><label className={LABEL}>Celular / WhatsApp</label><input value={form.data.phone} onChange={(e) => setForm((f) => ({ ...f, data: { ...f.data, phone: e.target.value } }))} className={INPUT} /></div>
             <div><label className={LABEL}>DNI de contacto</label><input value={form.data.contact_dni} onChange={(e) => setForm((f) => ({ ...f, data: { ...f.data, contact_dni: e.target.value.trim() } }))} className={INPUT} /></div>
           </div>

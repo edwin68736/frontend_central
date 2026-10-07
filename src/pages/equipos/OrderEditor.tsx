@@ -312,7 +312,6 @@ export default function OrderEditor({ open, onClose, orderId, onSaved }: Props) 
             </div>
             {form.customer_id && <p className="text-xs text-emerald-700">Cliente existente seleccionado. Editar el documento lo trata como otro cliente.</p>}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              <div className="col-span-2"><label className={LABEL}>Nombre / razón social *</label><input value={form.customer_name} onChange={(e) => set('customer_name', e.target.value)} className={INPUT} /></div>
               <div>
                 <label className={LABEL}>Tipo de documento</label>
                 <select value={form.customer_doc_type} onChange={(e) => setForm((f) => ({ ...f, customer_doc_type: e.target.value, customer_id: null }))} className={INPUT}>
@@ -329,6 +328,7 @@ export default function OrderEditor({ open, onClose, orderId, onSaved }: Props) 
                 </div>
                 {verified && <p className="text-[11px] text-emerald-700 mt-0.5">Verificado: {verified}</p>}
               </div>
+              <div className="col-span-2"><label className={LABEL}>Nombre / razón social *</label><input value={form.customer_name} onChange={(e) => set('customer_name', e.target.value)} className={INPUT} /></div>
               <div><label className={LABEL}>Celular / WhatsApp</label><input value={form.customer_phone} onChange={(e) => set('customer_phone', e.target.value)} className={INPUT} /></div>
               <div><label className={LABEL}>DNI de quien recoge</label><input value={form.contact_dni} onChange={(e) => set('contact_dni', e.target.value.trim())} className={INPUT} /></div>
               <label className="col-span-2 flex items-center gap-2 text-sm text-slate-700 self-end pb-2">
