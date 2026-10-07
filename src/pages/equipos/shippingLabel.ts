@@ -32,8 +32,8 @@ function drawLabel(doc: jsPDF, o: OrderView, x: number, y: number) {
   doc.text('TUKIFAC', x + pad, y + 7.5)
   const brandW = doc.getTextWidth('TUKIFAC')
   doc.setFontSize(10)
-  doc.text(`|  PEDIDO N° ${o.order_number}`, x + pad + brandW + 2, y + 7.5)
-  doc.text((sh?.carrier_name ?? '').toUpperCase(), x + LABEL_W - pad, y + 7.5, { align: 'right' })
+  if (sh?.carrier_name) doc.text(`|  ${sh.carrier_name.toUpperCase()}`, x + pad + brandW + 2, y + 7.5)
+  doc.text(`PEDIDO N° ${o.order_number}`, x + LABEL_W - pad, y + 7.5, { align: 'right' })
   doc.setLineWidth(0.2)
   doc.line(x + pad, y + 9.5, x + LABEL_W - pad, y + 9.5)
 
