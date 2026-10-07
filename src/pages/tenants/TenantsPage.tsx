@@ -27,7 +27,7 @@ import { subscriptionsService, type SaasSubscription } from '@/services/subscrip
 import { getRootDomain, getTenantHost, resolveTenantUrl, buildMasterAccessUrl } from '@/utils/tenantUrl'
 import { fileToBase64Binary, fileToBase64Text } from '@/utils/fileBase64'
 import { exportTableToExcel, type ExportColumn } from '@/utils/exportExcel'
-import { cycleLabelFromMonths } from '@/utils/billingCycle'
+import { cycleLabelWithBonus } from '@/utils/billingCycle'
 import { ubigeoService } from '@/services/ubigeo.service'
 import { UbigeoSelects, ubigeoToIds } from '@/components/UbigeoSelects'
 import { Card, CardHeader, CardBody } from '@/components/ui/Card'
@@ -228,6 +228,8 @@ const createSchema = z.object({
   // mismos 4 ciclos fijos del plan (1/3/6/12 meses, ver saas.FixedPlanCycleMonths) — son los
   // únicos que pueden traer descuento configurado; fuera de estos no hay nada que aplicar.
   subscription_months: z.union([z.literal(1), z.literal(3), z.literal(6), z.literal(12)]).optional(),
+  // Meses de cortesía: solo se ofrecen con la suscripción de 12 meses (el backend lo vuelve a validar).
+  subscription_bonus_months: z.number().int().min(0).max(6).optional(),
   // Vacío = arranca hoy (default de siempre). Si se elige, no puede ser una fecha pasada — el
   // backend vuelve a validar esto igual, nunca confiar solo en el frontend.
   start_date: z
@@ -493,7 +495,7 @@ export default function TenantsPage() {
         { key: 'email', label: 'Email' },
         { key: 'ruc', label: 'RUC' },
         { key: 'plan_name', label: 'Plan', format: (v, row) => (v as string) || row.plan || '' },
-        { key: 'id', label: 'Ciclo', format: (_v, row) => cycleLabelFromMonths(subsMap[row.id]?.billed_months) },
+        { key: 'id', label: 'Ciclo', format: (_v, row) => cycleLabelWithBonus(subsMap[row.id]?.billed_months, subsMap[row.id]?.bonus_months) },
         { key: 'sunat_env_mode', label: 'Modo SUNAT', format: (v) => (isProduction(v as string) ? 'Producción' : 'Pruebas') },
         { key: 'status', label: 'Estado', format: (v) => statusLabel(v as string) },
         { key: 'created_at', label: 'Fecha de activación', format: (v) => formatDateOnly(v as string) },
@@ -564,6 +566,7 @@ export default function TenantsPage() {
     defaultValues: {
       plan: '',
       subscription_months: 1,
+      subscription_bonus_months: 0,
       rubro: 'general',
       taxpayer_regime: 'general',
     },
@@ -602,6 +605,13 @@ export default function TenantsPage() {
 
   const createPlanValue = createForm.watch('plan')
   const createMonths = createForm.watch('subscription_months')
+  const createBonusRaw = createForm.watch('subscription_bonus_months')
+  // Los meses de cortesía solo existen con 12 meses; con otra duración valen 0.
+  const createBonus = Number(createMonths) === 12 ? Math.max(0, Number(createBonusRaw) || 0) : 0
+  useEffect(() => {
+    if (Number(createMonths) !== 12 && Number(createBonusRaw) > 0) createForm.setValue('subscription_bonus_months', 0)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [createMonths])
   const createStartDate = createForm.watch('start_date')
 
   /** Preview de vigencia: mismo cálculo que el backend (inicio + meses), solo para mostrar. */
@@ -610,10 +620,10 @@ export default function TenantsPage() {
     const start = createStartDate ? new Date(`${createStartDate}T00:00:00`) : new Date()
     start.setHours(0, 0, 0, 0)
     const end = new Date(start)
-    end.setMonth(end.getMonth() + months)
+    end.setMonth(end.getMonth() + months + createBonus)
     const fmt = (d: Date) => d.toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' })
     return { startLabel: fmt(start), endLabel: fmt(end) }
-  }, [createMonths, createStartDate])
+  }, [createMonths, createStartDate, createBonus])
 
   /**
    * Desglose del cobro inicial. Ya no se calcula a mano: se lee directo del ciclo que el plan
@@ -682,6 +692,7 @@ export default function TenantsPage() {
         address: data.address ?? '',
         ubigeo: createUbigeo.distritoId || undefined,
         subscription_months: months,
+        subscription_bonus_months: months === 12 ? createBonus : 0,
       })
       toast.success('Empresa creada correctamente')
 
@@ -1292,7 +1303,7 @@ export default function TenantsPage() {
                       <Badge variant="blue">{t.plan_name || t.plan}</Badge>
                     </td>
                     <td className="px-4 py-3 text-slate-600">
-                      {cycleLabelFromMonths(subscriptionsByTenantId[t.id]?.billed_months)}
+                      {cycleLabelWithBonus(subscriptionsByTenantId[t.id]?.billed_months, subscriptionsByTenantId[t.id]?.bonus_months)}
                     </td>
                     <td className="px-4 py-3 text-slate-600 whitespace-nowrap">
                       {formatDateOnly(t.created_at)}
@@ -1526,6 +1537,23 @@ export default function TenantsPage() {
                 Se creará la suscripción con el plan elegido y se emitirá su cobro por ese período.
               </p>
             </FormField>
+            {Number(createMonths) === 12 && (
+              <FormField label="Meses adicionales de cortesía (gratis)" error={createForm.formState.errors.subscription_bonus_months?.message}>
+                <select {...createForm.register('subscription_bonus_months', { valueAsNumber: true })} className={inputClass}>
+                  <option value={0}>Sin meses de cortesía</option>
+                  {[1, 2, 3, 4, 5, 6].map(m => (
+                    <option key={m} value={m}>
+                      +{m} {m === 1 ? 'mes' : 'meses'} gratis
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-500 mt-1">
+                  {createBonus > 0
+                    ? `Se cobran 12 meses; la vigencia será de ${12 + createBonus} meses (${createBonus} sin costo, con su cuota de comprobantes).`
+                    : 'Opcional. Los meses de cortesía se suman a la vigencia sin cobrarse.'}
+                </p>
+              </FormField>
+            )}
             <FormField
               label="Fecha de inicio de la suscripción (opcional)"
               error={createForm.formState.errors.start_date?.message}

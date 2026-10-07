@@ -19,7 +19,7 @@ import PaginationBar from '../../components/ui/PaginationBar'
 import TenantSearchSelect from '../../components/TenantSearchSelect'
 import type { PerPageOption } from '../../services/pagination'
 import { exportTableToExcel, type ExportColumn } from '../../utils/exportExcel'
-import { cycleLabelFromMonths, CYCLE_MONTHS_OPTIONS } from '../../utils/billingCycle'
+import { cycleLabelWithBonus, CYCLE_MONTHS_OPTIONS } from '../../utils/billingCycle'
 
 const STATUS_CONFIG = {
   active: { label: 'Activa', variant: 'green' as const },
@@ -398,7 +398,7 @@ export default function SubscriptionsPage() {
       const columns: ExportColumn<SaasSubscription>[] = [
         { key: 'id', label: 'Empresa', format: (_v, row) => tenantLabel(row) },
         { key: 'plan_name', label: 'Plan' },
-        { key: 'billed_months', label: 'Ciclo', format: (v) => cycleLabelFromMonths(v as number) },
+        { key: 'billed_months', label: 'Ciclo', format: (v, row) => cycleLabelWithBonus(v as number, (row as { bonus_months?: number }).bonus_months) },
         { key: 'start_date', label: 'Vigencia desde', format: (v) => fmtDate(v as string) },
         { key: 'end_date', label: 'Vigencia hasta', format: (v) => fmtDate(v as string) },
         {
@@ -587,7 +587,7 @@ export default function SubscriptionsPage() {
                     >
                       <td className="px-4 py-3 font-medium text-slate-800">{tenantLabel(sub)}</td>
                       <td className="px-4 py-3 text-slate-600">{sub.plan_name}</td>
-                      <td className="px-4 py-3 text-slate-600">{cycleLabelFromMonths(sub.billed_months)}</td>
+                      <td className="px-4 py-3 text-slate-600">{cycleLabelWithBonus(sub.billed_months, sub.bonus_months)}</td>
                       <td className="px-4 py-3">
                         <div className="text-slate-600">
                           {fmtDate(sub.start_date)} → {fmtDate(sub.end_date)}

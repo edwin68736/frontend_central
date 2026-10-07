@@ -16,6 +16,8 @@ export interface SaasSubscription {
   /** Meses VENDIDOS en esta suscripción/renovación (1 mensual, 3 trimestral, 6 semestral, 12
    *  anual...) — es lo que realmente se cobró. Usar esto para mostrar/filtrar el "ciclo". */
   billed_months?: number
+  /** Meses de cortesía (gratis) sumados a la vigencia; no se cobran. */
+  bonus_months?: number
   start_date: string
   end_date: string
   status: 'active' | 'expired' | 'suspended' | 'trial' | 'grace_period' | 'overdue' | 'provisional' | 'provisional_active' | 'cancelled'

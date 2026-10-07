@@ -75,6 +75,8 @@ export interface CreateTenantInput {
   taxpayer_regime?: 'general' | 'nrus'
   /** Duración en meses de la suscripción al crear la empresa (0 = no crear suscripción). Por defecto 1. */
   subscription_months?: number
+  /** Meses de cortesía (gratis) sumados a la vigencia: solo con 12 meses, máximo 6. No se cobran. */
+  subscription_bonus_months?: number
   /** YYYY-MM-DD opcional: la suscripción/primer cobro arranca esta fecha en vez de hoy (debe ser
    * hoy o futura). Útil cuando se registra la empresa hoy pero recién va a operar/pagar más
    * adelante. Vacío = arranca hoy, como siempre. */

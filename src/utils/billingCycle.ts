@@ -22,3 +22,9 @@ export function cycleLabelFromMonths(months?: number | null): string {
   if (!months || months <= 0) return '—'
   return CYCLE_MONTHS_LABELS[months] ?? `${months} meses`
 }
+
+/** Etiqueta del ciclo con los meses de cortesía: «Anual + 2 gratis». */
+export function cycleLabelWithBonus(months?: number | null, bonus?: number | null): string {
+  const base = cycleLabelFromMonths(months)
+  return base !== '—' && bonus && bonus > 0 ? `${base} + ${bonus} gratis` : base
+}
