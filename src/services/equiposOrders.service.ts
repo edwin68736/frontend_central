@@ -354,7 +354,9 @@ export const equiposOrders = {
   customerAccount: (id: number) => api.get<{ data: CustomerAccount }>(`${base}/customers/${id}/account`).then((r) => r.data.data),
   openBalances: (id: number) => api.get<{ data: AccountOrder[] }>(`${base}/customers/${id}/open-balances`).then((r) => r.data.data ?? []),
 
-  listOrders: (f: OrderFilter) => api.get<{ data: OrderListResult }>(`${base}/orders`, { params: f }).then((r) => r.data.data),
+  // `rows` puede llegar como null cuando no hay pedidos: se normaliza para que la tabla nunca lea null.length.
+  listOrders: (f: OrderFilter) =>
+    api.get<{ data: OrderListResult }>(`${base}/orders`, { params: f }).then((r) => ({ ...r.data.data, rows: r.data.data.rows ?? [] })),
   getOrder: (id: number) => api.get<{ data: OrderView }>(`${base}/orders/${id}`).then((r) => r.data.data),
   createOrder: (body: OrderInput) => api.post<OrderResponse>(`${base}/orders`, body).then(unwrap),
   updateOrder: (id: number, body: OrderInput & { allow_negative?: boolean; negative_note?: string }, pin?: string) =>
@@ -375,7 +377,7 @@ export const equiposOrders = {
   labelPrinted: (orderId: number) => api.post(`${base}/orders/${orderId}/label-printed`).then((r) => r.data),
 
   listPayments: (params: { customer_id?: number; from?: string; to?: string; method?: string; status?: string; q?: string; page?: number; per_page?: number }) =>
-    api.get<{ data: PaymentListResult }>(`${base}/payments`, { params }).then((r) => r.data.data),
+    api.get<{ data: PaymentListResult }>(`${base}/payments`, { params }).then((r) => ({ ...r.data.data, rows: r.data.data.rows ?? [] })),
   createPayment: (body: PaymentInput) => api.post<{ data: PaymentView }>(`${base}/payments`, body).then((r) => r.data.data),
   voidPayment: (id: number, reason: string, pin?: string) => api.post<{ data: PaymentView }>(`${base}/payments/${id}/void`, { reason }, pinHeader(pin)).then((r) => r.data.data),
   allocatePayment: (id: number, allocations: { order_id: number; amount: number }[]) =>
