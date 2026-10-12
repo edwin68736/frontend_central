@@ -21,6 +21,7 @@ export interface EquipProduct {
   active: boolean
   stock: number
   semaphore: '' | 'suficiente' | 'moderado' | 'bajo'
+  last_price?: number
 }
 
 export interface EquipProductInput {
@@ -71,9 +72,71 @@ export interface EquipCarrier {
   is_default: boolean
   active: boolean
   sort_order: number
+  default_origin_agency_id: number | null
+  agency_count?: number
 }
 
-export type EquipCarrierInput = Omit<EquipCarrier, 'id'>
+export type EquipCarrierInput = Omit<EquipCarrier, 'id' | 'agency_count'>
+
+export type AgencyLocationStatus = 'confirmada' | 'sugerida' | 'pendiente'
+
+export interface EquipAgency {
+  id: number
+  carrier_id: number
+  code: string
+  name: string
+  department: string
+  province: string
+  district: string
+  ubigeo: string
+  address: string
+  location_status: AgencyLocationStatus
+  active: boolean
+}
+
+export interface EquipAgencyInput {
+  code: string
+  name: string
+  department: string
+  province: string
+  district: string
+  ubigeo: string
+  address: string
+  active: boolean
+}
+
+export interface AgencyImportRow {
+  code: string
+  name: string
+  department?: string
+  province?: string
+  district?: string
+  address?: string
+}
+
+export interface AgencyImportItem {
+  code: string
+  name: string
+  department: string
+  province: string
+  district: string
+  location_status: AgencyLocationStatus
+  action: 'crear' | 'actualizar' | 'sin_cambios'
+}
+
+export interface AgencyImportResult {
+  total: number
+  created: number
+  updated: number
+  unchanged: number
+  duplicate: number
+  confirmed: number
+  suggested: number
+  pending: number
+  committed: boolean
+  warnings: string[] | null
+  review: AgencyImportItem[] | null
+}
 
 export interface EquipSettings {
   default_carrier_id: number | null
@@ -222,6 +285,12 @@ export const equiposService = {
     api.get<{ data: EquipCarrier[] }>(`${base}/carriers`, { params: { include_inactive: includeInactive ? 1 : undefined } }).then((r) => r.data.data ?? []),
   createCarrier: (body: EquipCarrierInput) => api.post(`${base}/carriers`, body).then((r) => r.data.data as EquipCarrier),
   updateCarrier: (id: number, body: EquipCarrierInput) => api.put(`${base}/carriers/${id}`, body).then((r) => r.data.data as EquipCarrier),
+  listAgencies: (carrierId: number, includeInactive = true) =>
+    api.get<{ data: EquipAgency[] }>(`${base}/carriers/${carrierId}/agencies`, { params: { include_inactive: includeInactive ? 1 : undefined } }).then((r) => r.data.data ?? []),
+  createAgency: (carrierId: number, body: EquipAgencyInput) => api.post(`${base}/carriers/${carrierId}/agencies`, body).then((r) => r.data.data as EquipAgency),
+  updateAgency: (id: number, body: EquipAgencyInput) => api.put(`${base}/agencies/${id}`, body).then((r) => r.data.data as EquipAgency),
+  importAgencies: (carrierId: number, rows: AgencyImportRow[], commit: boolean) =>
+    api.post<{ data: AgencyImportResult }>(`${base}/carriers/${carrierId}/agencies/import`, { rows, commit }).then((r) => r.data.data),
 
   getSettings: () => api.get<{ data: EquipSettings }>(`${base}/settings`).then((r) => r.data.data),
   hasSecurityPin: () => api.get<{ has_security_pin: boolean }>(`${base}/settings`).then((r) => !!r.data.has_security_pin),

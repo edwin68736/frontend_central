@@ -5,7 +5,7 @@ import Modal from '@/components/ui/Modal'
 import Spinner from '@/components/ui/Spinner'
 import SearchSelect from '@/components/ui/SearchSelect'
 import {
-  equiposService, type EquipCarrier, type EquipCombo, type EquipProduct,
+  equiposService, type EquipAgency, type EquipCarrier, type EquipCombo, type EquipProduct,
 } from '@/services/equipos.service'
 import {
   DELIVERY_MODE_LABEL, equiposOrders, negativeStockItems, type DeliveryMode, type EquipCustomerRow, type LineType,
@@ -23,10 +23,11 @@ const emptyItem = (): OrderItemInput => ({ line_type: 'producto', product_id: nu
 const emptyShipment = (carrierId: number | null) => ({
   carrier_id: carrierId, guide_number: '', destination_agency: '', destination_department: '', destination_province: '',
   destination_district: '', delivery_mode: 'agencia' as DeliveryMode, scheduled_dispatch_date: '', notes: '',
+  origin_agency_id: null as number | null, destination_agency_id: null as number | null,
 })
 
 const emptyForm = (carrierId: number | null): OrderInput => ({
-  customer_id: null, customer_name: '', customer_doc_type: 'DNI', customer_doc_number: '', contact_dni: '', customer_phone: '',
+  customer_id: null, customer_name: '', customer_doc_type: 'DNI', customer_doc_number: '', contact_dni: '', contact_name: '', customer_phone: '',
   save_customer: true, sale_type: 'independiente', order_date: todayISO(), billing_doc_type: 'ninguno', notes: '',
   items: [emptyItem()], shipment: emptyShipment(carrierId),
 })
@@ -34,7 +35,7 @@ const emptyForm = (carrierId: number | null): OrderInput => ({
 function fromView(o: OrderView): OrderInput {
   return {
     customer_id: o.customer_id, customer_name: o.customer_name, customer_doc_type: o.customer_doc_type || 'DNI',
-    customer_doc_number: o.customer_doc_number, contact_dni: o.contact_dni, customer_phone: o.customer_phone, save_customer: false,
+    customer_doc_number: o.customer_doc_number, contact_dni: o.contact_dni, contact_name: o.contact_name ?? '', customer_phone: o.customer_phone, save_customer: false,
     sale_type: o.sale_type, order_date: toDateInput(o.order_date), billing_doc_type: o.billing_doc_type || 'ninguno', notes: o.notes,
     items: o.items.map((i) => ({
       line_type: i.line_type, product_id: i.product_id, combo_id: i.combo_id, description: i.description, plan_months: i.plan_months,
@@ -46,6 +47,7 @@ function fromView(o: OrderView): OrderInput {
           destination_department: o.shipment.destination_department, destination_province: o.shipment.destination_province,
           destination_district: o.shipment.destination_district, delivery_mode: o.shipment.delivery_mode,
           scheduled_dispatch_date: toDateInput(o.shipment.scheduled_dispatch_date), notes: o.shipment.notes, freight_cost: o.shipment.freight_cost,
+          origin_agency_id: o.shipment.origin_agency_id, destination_agency_id: o.shipment.destination_agency_id,
         }
       : null,
   }
@@ -74,6 +76,10 @@ export default function OrderEditor({ open, onClose, orderId, onSaved }: Props) 
   const ask = useConfirm()
   const [verified, setVerified] = useState('')
   const [looking, setLooking] = useState(false)
+  const [otherPickup, setOtherPickup] = useState(false)
+  const [lookingPickup, setLookingPickup] = useState(false)
+  const [agencies, setAgencies] = useState<EquipAgency[]>([])
+  const [manualAgency, setManualAgency] = useState(false)
 
   useEffect(() => {
     if (!open) return
@@ -89,9 +95,14 @@ export default function OrderEditor({ open, onClose, orderId, onSaved }: Props) 
         if (orderId) {
           const o = await equiposOrders.getOrder(orderId)
           if (!alive) return
-          setForm(fromView(o)); setStatus(o.status)
+          setForm(fromView(o)); setStatus(o.status); setOtherPickup(!!(o.contact_dni || o.contact_name))
+          setManualAgency(!o.shipment?.destination_agency_id && !!o.shipment?.destination_agency)
         } else {
-          setForm(emptyForm(def)); setStatus('borrador')
+          {
+            const f = emptyForm(def)
+            if (f.shipment) f.shipment.origin_agency_id = ca.find((x) => x.id === def)?.default_origin_agency_id ?? null
+            setForm(f); setStatus('borrador'); setOtherPickup(false); setManualAgency(false)
+          }
         }
       } catch (e) {
         toast.error(apiError(e, 'No se pudo cargar el formulario'))
@@ -111,10 +122,44 @@ export default function OrderEditor({ open, onClose, orderId, onSaved }: Props) 
     setForm((f) => ({ ...f, shipment: { ...(f.shipment ?? emptyShipment(null)), ...patch } }))
 
   const refPrice = (it: OrderItemInput): number => {
-    if (it.line_type === 'producto') return products.find((p) => p.id === it.product_id)?.reference_price ?? 0
+    if (it.line_type === 'producto') { const p = products.find((x) => x.id === it.product_id); return p?.reference_price || p?.last_price || 0 }
     if (it.line_type === 'combo') return combos.find((c) => c.id === it.combo_id)?.reference_price ?? 0
     return 0
   }
+
+  // Agencias del transportista elegido (si las tiene cargadas): el destino se elige por departamento → provincia → distrito → agencia.
+  const carrier = carriers.find((c) => c.id === form.shipment?.carrier_id)
+  const carrierId = carrier?.id
+  const hasAgencies = (carrier?.agency_count ?? 0) > 0
+  useEffect(() => {
+    if (!open || !carrierId || !hasAgencies) { setAgencies([]); return }
+    let alive = true
+    equiposService.listAgencies(carrierId, false).then((r) => alive && setAgencies(r)).catch(() => alive && setAgencies([]))
+    return () => { alive = false }
+  }, [open, carrierId, hasAgencies])
+  const selDep = form.shipment?.destination_department ?? ''
+  const selProv = form.shipment?.destination_province ?? ''
+  const selDist = form.shipment?.destination_district ?? ''
+  const agDepartments = useMemo(() => [...new Set(agencies.map((a) => a.department).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es')), [agencies])
+  const agProvinces = useMemo(() => [...new Set(agencies.filter((a) => a.department === selDep).map((a) => a.province).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es')), [agencies, selDep])
+  const agDistricts = useMemo(() => [...new Set(agencies.filter((a) => a.department === selDep && (!selProv || a.province === selProv)).map((a) => a.district).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es')), [agencies, selDep, selProv])
+  const agOptions = useMemo(() => agencies
+    .filter((a) => !selDep || (a.department === selDep && (!selProv || a.province === selProv) && (!selDist || a.district === selDist)))
+    .map((a) => ({ value: a.id, label: a.name, hint: [a.district, a.province, a.department].filter(Boolean).join(' · ') + (a.address ? ` — ${a.address}` : '') })), [agencies, selDep, selProv, selDist])
+  const pickAgency = (id: number | null) => {
+    const a = agencies.find((x) => x.id === id)
+    if (!a) return setShip({ destination_agency_id: null, destination_agency: '' })
+    setShip({
+      destination_agency_id: a.id, destination_agency: a.address ? `${a.name} - ${a.address}` : a.name,
+      ...(a.department ? { destination_department: a.department, destination_province: a.province, destination_district: a.district } : {}),
+    })
+  }
+  const changeCarrier = (id: number | null) => {
+    const c = carriers.find((x) => x.id === id)
+    setManualAgency(false)
+    setShip({ carrier_id: id, origin_agency_id: c?.default_origin_agency_id ?? null, destination_agency_id: null })
+  }
+
   const total = useMemo(() => form.items.reduce((s, it) => s + (it.is_courtesy ? 0 : it.quantity * it.unit_price), 0), [form.items])
 
   const debSearch = useDebounced(search, 450)
@@ -150,15 +195,37 @@ export default function OrderEditor({ open, onClose, orderId, onSaved }: Props) 
     if ((t === 'DNI' && /^\d{8}$/.test(debDoc)) || (t === 'RUC' && /^\d{11}$/.test(debDoc))) void runLookup(t, debDoc, true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debDoc, form.customer_doc_type, open])
+  // Consulta el DNI de quien recoge y trae su nombre (será el destinatario del rótulo).
+  const runPickupLookup = async (number: string, silent: boolean) => {
+    setLookingPickup(true)
+    try {
+      const r = await equiposOrders.lookup('dni', number)
+      if (r.success && r.name) setForm((f) => (f.contact_dni === number ? { ...f, contact_name: r.name } : f))
+      else if (!silent) toast.warning('El DNI no se encontró en la consulta; puedes escribir el nombre a mano')
+    } catch (e) {
+      if (!silent) toast.warning(apiError(e, 'No se pudo consultar el DNI'))
+    } finally {
+      setLookingPickup(false)
+    }
+  }
+  const debPickup = useDebounced(form.contact_dni, 600)
+  useEffect(() => {
+    if (!open || !otherPickup || orderId) return
+    if (/^\d{8}$/.test(debPickup)) void runPickupLookup(debPickup, true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debPickup, otherPickup, open])
+  const togglePickup = (on: boolean) => {
+    setOtherPickup(on)
+    if (!on) setForm((f) => ({ ...f, contact_dni: '', contact_name: '' }))
+  }
   const pickCustomer = (c: EquipCustomerRow) => {
     setForm((f) => ({
       ...f, customer_id: c.id, customer_name: c.name, customer_doc_type: c.doc_type, customer_doc_number: c.doc_number ?? '',
-      contact_dni: c.contact_dni, customer_phone: c.phone, save_customer: false,
+      contact_dni: c.contact_dni, contact_name: '', customer_phone: c.phone, save_customer: false,
     }))
+    setOtherPickup(!!c.contact_dni)
     setSearch(''); setFound([])
   }
-
-  const carrier = carriers.find((c) => c.id === form.shipment?.carrier_id)
 
   const validate = (): string | null => {
     const f = form
@@ -168,7 +235,10 @@ export default function OrderEditor({ open, onClose, orderId, onSaved }: Props) 
       if (f.customer_doc_type === 'DNI' && !/^\d{8}$/.test(doc)) return 'El DNI debe tener 8 dígitos'
       if (f.customer_doc_type === 'RUC' && !/^\d{11}$/.test(doc)) return 'El RUC debe tener 11 dígitos'
     } else if (f.save_customer) return 'Para guardar el cliente indica su documento'
-    if (f.contact_dni && !/^\d{8}$/.test(f.contact_dni)) return 'El DNI de contacto debe tener 8 dígitos'
+    if (otherPickup) {
+      if (!/^\d{8}$/.test(f.contact_dni)) return 'El DNI de quien recoge debe tener 8 dígitos'
+      if (!f.contact_name.trim()) return 'Indica el nombre de quien recoge'
+    }
     const phone = f.customer_phone.replace(/[\s-]/g, '')
     if (phone && !/^(\+?51)?9\d{8}$/.test(phone) && !/^\+?\d{7,15}$/.test(phone)) return 'El teléfono no parece válido'
     if (f.items.length === 0) return 'Agrega al menos un ítem'
@@ -330,12 +400,33 @@ export default function OrderEditor({ open, onClose, orderId, onSaved }: Props) 
               </div>
               <div className="col-span-2"><label className={LABEL}>Nombre / razón social *</label><input value={form.customer_name} onChange={(e) => set('customer_name', e.target.value)} className={INPUT} /></div>
               <div><label className={LABEL}>Celular / WhatsApp</label><input value={form.customer_phone} onChange={(e) => set('customer_phone', e.target.value)} className={INPUT} /></div>
-              <div><label className={LABEL}>DNI de quien recoge</label><input value={form.contact_dni} onChange={(e) => set('contact_dni', e.target.value.trim())} className={INPUT} /></div>
-              <label className="col-span-2 flex items-center gap-2 text-sm text-slate-700 self-end pb-2">
-                <input type="checkbox" checked={form.save_customer} disabled={!!form.customer_id} onChange={(e) => set('save_customer', e.target.checked)} className="rounded" />
-                Guardar como cliente (para su historial de pagos)
-              </label>
+              <div className="col-span-2 flex flex-col justify-end gap-1.5 pb-2">
+                <label className="flex items-center gap-2 text-sm text-slate-700">
+                  <input type="checkbox" checked={form.save_customer} disabled={!!form.customer_id} onChange={(e) => set('save_customer', e.target.checked)} className="rounded" />
+                  Guardar como cliente (para su historial de pagos)
+                </label>
+                <label className="flex items-center gap-2 text-sm text-slate-700">
+                  <input type="checkbox" checked={otherPickup} onChange={(e) => togglePickup(e.target.checked)} className="rounded" />
+                  Recoge otra persona (no el cliente)
+                </label>
+              </div>
             </div>
+            {otherPickup && (
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 rounded-lg bg-slate-50 p-3">
+                <div>
+                  <label className={LABEL}>DNI de quien recoge</label>
+                  <div className="flex gap-1">
+                    <input value={form.contact_dni} onChange={(e) => set('contact_dni', e.target.value.trim())} className={INPUT} />
+                    <button type="button" className={BTN_SECONDARY} disabled={lookingPickup || form.contact_dni.length !== 8} onClick={() => void runPickupLookup(form.contact_dni, false)}>{lookingPickup ? '…' : 'Consultar'}</button>
+                  </div>
+                </div>
+                <div className="col-span-2">
+                  <label className={LABEL}>Nombre de quien recoge *</label>
+                  <input value={form.contact_name} onChange={(e) => set('contact_name', e.target.value)} className={INPUT} />
+                  <p className="text-[11px] text-slate-500 mt-0.5">Este nombre irá como destinatario en el rótulo.</p>
+                </div>
+              </div>
+            )}
           </section>
 
           {/* Datos del pedido */}
@@ -377,7 +468,7 @@ export default function OrderEditor({ open, onClose, orderId, onSaved }: Props) 
                           options={products.filter((p) => p.active).map((p) => ({ value: p.id, label: p.code, hint: p.name !== p.code ? p.name : undefined }))}
                           onChange={(v) => {
                             const pr = products.find((x) => x.id === Number(v))
-                            setItem(i, { product_id: pr?.id ?? null, unit_price: pr ? pr.reference_price : 0 })
+                            setItem(i, { product_id: pr?.id ?? null, unit_price: pr ? (pr.reference_price || pr.last_price || 0) : 0 })
                           }} />
                       )}
                       {it.line_type === 'combo' && (
@@ -419,7 +510,7 @@ export default function OrderEditor({ open, onClose, orderId, onSaved }: Props) 
               <div>
                 <label className={LABEL}>Transportista</label>
                 <SearchSelect value={form.shipment?.carrier_id} placeholder="Sin definir" searchPlaceholder="Buscar transportista…" clearable
-                  options={carriers.map((c) => ({ value: c.id, label: c.name }))} onChange={(v) => setShip({ carrier_id: v ? Number(v) : null })} />
+                  options={carriers.map((c) => ({ value: c.id, label: c.name }))} onChange={(v) => changeCarrier(v ? Number(v) : null)} />
               </div>
               <div>
                 <label className={LABEL}>Modalidad</label>
@@ -427,14 +518,58 @@ export default function OrderEditor({ open, onClose, orderId, onSaved }: Props) 
                   {Object.entries(DELIVERY_MODE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                 </select>
               </div>
-              <div>
-                <label className={LABEL}>Departamento</label>
-                <input list="equip-deps" value={form.shipment?.destination_department ?? ''} onChange={(e) => setShip({ destination_department: e.target.value })} className={INPUT} />
-                <datalist id="equip-deps">{DEPARTMENTS.map((d) => <option key={d} value={d} />)}</datalist>
-              </div>
-              <div><label className={LABEL}>Provincia</label><input value={form.shipment?.destination_province ?? ''} onChange={(e) => setShip({ destination_province: e.target.value })} className={INPUT} /></div>
-              <div><label className={LABEL}>Distrito</label><input value={form.shipment?.destination_district ?? ''} onChange={(e) => setShip({ destination_district: e.target.value })} className={INPUT} /></div>
-              <div><label className={LABEL}>Agencia / dirección de destino</label><input value={form.shipment?.destination_agency ?? ''} onChange={(e) => setShip({ destination_agency: e.target.value })} className={INPUT} /></div>
+              {hasAgencies && !manualAgency ? (
+                <>
+                  <div>
+                    <label className={LABEL}>Departamento</label>
+                    <select value={selDep} onChange={(e) => setShip({ destination_department: e.target.value, destination_province: '', destination_district: '', destination_agency_id: null, destination_agency: '' })} className={INPUT}>
+                      <option value="">Todos</option>
+                      {agDepartments.map((d) => <option key={d} value={d}>{d}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className={LABEL}>Provincia</label>
+                    <select value={selProv} disabled={!selDep} onChange={(e) => setShip({ destination_province: e.target.value, destination_district: '', destination_agency_id: null, destination_agency: '' })} className={INPUT}>
+                      <option value="">Todas</option>
+                      {agProvinces.map((d) => <option key={d} value={d}>{d}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className={LABEL}>Distrito</label>
+                    <select value={selDist} disabled={!selDep} onChange={(e) => setShip({ destination_district: e.target.value, destination_agency_id: null, destination_agency: '' })} className={INPUT}>
+                      <option value="">Todos</option>
+                      {agDistricts.map((d) => <option key={d} value={d}>{d}</option>)}
+                    </select>
+                  </div>
+                  <div className="col-span-2">
+                    <label className={LABEL}>Agencia de destino</label>
+                    <SearchSelect value={form.shipment?.destination_agency_id} placeholder="Elegir agencia…" searchPlaceholder="Buscar agencia…" clearable
+                      options={agOptions} onChange={(v) => pickAgency(v ? Number(v) : null)} />
+                    <button type="button" className="text-[11px] text-indigo-600 hover:underline mt-0.5" onClick={() => { setManualAgency(true); setShip({ destination_agency_id: null }) }}>La agencia no está en la lista: escribirla a mano</button>
+                  </div>
+                  <div>
+                    <label className={LABEL}>Agencia de origen</label>
+                    <SearchSelect value={form.shipment?.origin_agency_id} placeholder="Sin definir" searchPlaceholder="Buscar agencia…" clearable
+                      options={agencies.map((a) => ({ value: a.id, label: a.name, hint: [a.district, a.department].filter(Boolean).join(' · ') }))}
+                      onChange={(v) => setShip({ origin_agency_id: v ? Number(v) : null })} />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <label className={LABEL}>Departamento</label>
+                    <input list="equip-deps" value={form.shipment?.destination_department ?? ''} onChange={(e) => setShip({ destination_department: e.target.value })} className={INPUT} />
+                    <datalist id="equip-deps">{DEPARTMENTS.map((d) => <option key={d} value={d} />)}</datalist>
+                  </div>
+                  <div><label className={LABEL}>Provincia</label><input value={form.shipment?.destination_province ?? ''} onChange={(e) => setShip({ destination_province: e.target.value })} className={INPUT} /></div>
+                  <div><label className={LABEL}>Distrito</label><input value={form.shipment?.destination_district ?? ''} onChange={(e) => setShip({ destination_district: e.target.value })} className={INPUT} /></div>
+                  <div>
+                    <label className={LABEL}>Agencia / dirección de destino</label>
+                    <input value={form.shipment?.destination_agency ?? ''} onChange={(e) => setShip({ destination_agency: e.target.value })} className={INPUT} />
+                    {hasAgencies && <button type="button" className="text-[11px] text-indigo-600 hover:underline mt-0.5" onClick={() => setManualAgency(false)}>Elegir de la lista de agencias</button>}
+                  </div>
+                </>
+              )}
               <div><label className={LABEL}>{carrier?.guide_label || 'N° de guía'} (opcional ahora)</label><input value={form.shipment?.guide_number ?? ''} onChange={(e) => setShip({ guide_number: e.target.value.trim() })} className={INPUT} /></div>
               <div><label className={LABEL}>Costo del flete (opcional)</label><input type="number" min={0} step="0.01" value={form.shipment?.freight_cost ?? ''} onChange={(e) => setShip({ freight_cost: e.target.value === '' ? null : Number(e.target.value) })} className={INPUT} /></div>
               <div><label className={LABEL}>Despacho programado</label><input type="date" value={form.shipment?.scheduled_dispatch_date ?? ''} onChange={(e) => setShip({ scheduled_dispatch_date: e.target.value })} className={INPUT} /></div>

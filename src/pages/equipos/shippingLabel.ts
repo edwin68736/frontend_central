@@ -58,13 +58,15 @@ function drawLabel(doc: jsPDF, o: OrderView, x: number, y: number) {
 
   // Destinatario
   tag('DESTINATARIO', ix, y + 14.7)
-  const name = o.customer_name.toUpperCase()
+  const pickup = o.contact_name?.trim()
+  const name = (pickup || o.customer_name).toUpperCase()
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(10)
   const oneLine = doc.getTextWidth(name) <= iw
   if (oneLine) text(name, ix, y + 19.5, 10, true)
   else text(name, ix, y + 18.8, 8.5, true, iw, 2)
-  const ids = [o.customer_doc_type && o.customer_doc_number ? `${o.customer_doc_type}: ${o.customer_doc_number}` : '', o.customer_phone ? `Cel.: ${o.customer_phone}` : '']
+  const docLine = pickup ? (o.contact_dni ? `DNI: ${o.contact_dni}` : '') : o.customer_doc_type && o.customer_doc_number ? `${o.customer_doc_type}: ${o.customer_doc_number}` : ''
+  const ids = [docLine, o.customer_phone ? `Cel.: ${o.customer_phone}` : '']
     .filter(Boolean).join('   ')
   if (ids) text(ids, ix, oneLine ? y + 24.6 : y + 26.6, 7.5, false, iw, 1)
 
@@ -81,7 +83,7 @@ function drawLabel(doc: jsPDF, o: OrderView, x: number, y: number) {
   tag(sh?.guide_label ? sh.guide_label.toUpperCase() : 'GUÍA', gx, y + 14.7)
   text(sh?.guide_number || '—', gx, y + 20.5, 12, true, gw, 1)
   if (sh) text(DELIVERY_MODE_LABEL[sh.delivery_mode] ?? sh.delivery_mode, gx, y + 24.7, 7, false, gw, 1)
-  if (o.contact_dni) text(`Recoge DNI ${o.contact_dni}`, gx, y + 27.6, 7, false, gw, 1)
+  if (o.contact_dni && !pickup) text(`Recoge DNI ${o.contact_dni}`, gx, y + 27.6, 7, false, gw, 1)
 
   // Contenido
   tag('CONTENIDO', gx, y + 33.2)

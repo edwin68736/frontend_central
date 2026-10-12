@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { Pencil, Plus, Truck } from 'lucide-react'
+import { MapPin, Pencil, Plus, Truck } from 'lucide-react'
 import Modal from '@/components/ui/Modal'
 import Spinner from '@/components/ui/Spinner'
 import { useAuth } from '@/contexts/AuthContext'
 import { equiposService, type EquipCarrier, type EquipCarrierInput } from '@/services/equipos.service'
 import { useConfirm } from './ConfirmProvider'
+import AgenciesModal from './AgenciesModal'
 import { ActiveBadge, apiError, BTN_PRIMARY, BTN_SECONDARY, DAYS, formatDays, INPUT, LABEL } from './common'
 
 const EMPTY: EquipCarrierInput = {
   code: '', name: '', dispatch_days: '', pickup_days: 15, guide_label: 'N° de guía', guide_format: '',
-  tracking_url_template: '', label_template: '', is_default: false, active: true, sort_order: 0,
+  tracking_url_template: '', label_template: '', is_default: false, active: true, sort_order: 0, default_origin_agency_id: null,
 }
 
 export default function CarriersTab() {
@@ -21,6 +22,7 @@ export default function CarriersTab() {
   const [form, setForm] = useState<{ open: boolean; id?: number; data: EquipCarrierInput }>({ open: false, data: EMPTY })
   const [saving, setSaving] = useState(false)
   const confirm = useConfirm()
+  const [agenciesOf, setAgenciesOf] = useState<number | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -41,7 +43,7 @@ export default function CarriersTab() {
     setForm({
       open: true,
       id: c?.id,
-      data: c ? { code: c.code, name: c.name, dispatch_days: c.dispatch_days, pickup_days: c.pickup_days, guide_label: c.guide_label, guide_format: c.guide_format, tracking_url_template: c.tracking_url_template, label_template: c.label_template, is_default: c.is_default, active: c.active, sort_order: c.sort_order } : EMPTY,
+      data: c ? { code: c.code, name: c.name, dispatch_days: c.dispatch_days, pickup_days: c.pickup_days, guide_label: c.guide_label, guide_format: c.guide_format, tracking_url_template: c.tracking_url_template, label_template: c.label_template, is_default: c.is_default, active: c.active, sort_order: c.sort_order, default_origin_agency_id: c.default_origin_agency_id } : EMPTY,
     })
 
   const selectedDays = new Set(form.data.dispatch_days.split(',').map((d) => d.trim()).filter(Boolean))
@@ -73,7 +75,7 @@ export default function CarriersTab() {
     }
   }
 
-  if (loading) return <div className="flex justify-center py-16"><Spinner /></div>
+  if (loading && rows.length === 0) return <div className="flex justify-center py-16"><Spinner /></div>
 
   return (
     <div className="space-y-4">
@@ -104,11 +106,16 @@ export default function CarriersTab() {
               <div className="flex justify-between"><dt className="text-slate-400">Plazo de recojo</dt><dd>{c.pickup_days} días</dd></div>
               <div className="flex justify-between"><dt className="text-slate-400">Guía</dt><dd>{c.guide_label}{c.guide_format && <span className="text-xs text-slate-400"> · valida formato</span>}</dd></div>
             </dl>
-            {canEdit && <div className="mt-3 text-right"><button type="button" className={BTN_SECONDARY} onClick={() => open(c)}><Pencil size={12} /> Editar</button></div>}
+            <div className="mt-3 flex items-center justify-between gap-2">
+              <button type="button" className={BTN_SECONDARY} onClick={() => setAgenciesOf(c.id)}><MapPin size={12} /> Agencias{c.agency_count ? ` (${c.agency_count})` : ''}</button>
+              {canEdit && <button type="button" className={BTN_SECONDARY} onClick={() => open(c)}><Pencil size={12} /> Editar</button>}
+            </div>
           </div>
         ))}
         {rows.length === 0 && <p className="col-span-full text-center text-slate-400 py-10">Aún no hay transportistas. Se crea «Shalom» al importar el Excel, o agrégalos aquí.</p>}
       </div>
+
+      <AgenciesModal carrier={rows.find((c) => c.id === agenciesOf) ?? null} onClose={() => setAgenciesOf(null)} onChanged={() => void load()} />
 
       <Modal open={form.open} onClose={() => setForm((f) => ({ ...f, open: false }))} title={form.id ? 'Editar transportista' : 'Nuevo transportista'}>
         <div className="space-y-3">

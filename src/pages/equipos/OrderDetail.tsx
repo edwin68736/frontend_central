@@ -130,7 +130,7 @@ export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Pro
                 <p className="font-semibold text-slate-800">{o.customer_name}</p>
                 <p className="text-slate-600">{o.customer_doc_type} {o.customer_doc_number}</p>
                 {o.customer_phone && <p className="text-slate-600">Cel. {o.customer_phone}</p>}
-                {o.contact_dni && <p className="text-slate-600">DNI de quien recoge: {o.contact_dni}</p>}
+                {(o.contact_dni || o.contact_name) && <p className="text-slate-600">Recoge: {o.contact_name}{o.contact_dni ? ` · DNI ${o.contact_dni}` : ""}</p>}
                 {o.billing_doc_type !== 'ninguno' && <p className="text-slate-600">Comprobante: {o.billing_doc_type}</p>}
                 {o.notes && <p className="text-slate-500 italic">{o.notes}</p>}
               </section>

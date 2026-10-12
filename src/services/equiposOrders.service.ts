@@ -60,6 +60,8 @@ export interface ShipmentInput {
   carrier_id: number | null
   guide_number: string
   destination_agency: string
+  origin_agency_id?: number | null
+  destination_agency_id?: number | null
   destination_department: string
   destination_province: string
   destination_district: string
@@ -75,6 +77,7 @@ export interface OrderInput {
   customer_doc_type: string
   customer_doc_number: string
   contact_dni: string
+  contact_name: string
   customer_phone: string
   save_customer: boolean
   sale_type: SaleType
@@ -129,6 +132,9 @@ export interface ShipmentView {
   carrier_id: number | null
   guide_number: string
   destination_agency: string
+  origin_agency_id: number | null
+  destination_agency_id: number | null
+  origin_agency_name: string
   destination_department: string
   destination_province: string
   destination_district: string
@@ -167,6 +173,7 @@ export interface OrderView {
   customer_doc_type: string
   customer_doc_number: string
   contact_dni: string
+  contact_name: string
   customer_phone: string
   billing_doc_type: string
   total_amount: number
