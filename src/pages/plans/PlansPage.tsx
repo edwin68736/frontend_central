@@ -99,7 +99,8 @@ export default function PlansPage() {
     try {
       const [p, m] = await Promise.all([plansService.list(), plansService.listModules()])
       setPlans(p)
-      setModules(m)
+      // Los módulos implementados primero (en su orden); los «Próximamente» al final.
+      setModules([...m].sort((a, b) => Number(b.implemented) - Number(a.implemented) || a.sort_order - b.sort_order || a.id - b.id))
     } catch { toast.error('Error cargando datos') }
     finally { setLoading(false) }
   }
