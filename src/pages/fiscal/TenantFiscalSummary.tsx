@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { RefreshCw, Send, Search, FileSpreadsheet, ChevronDown, ChevronRight, ExternalLink, AlertTriangle } from 'lucide-react'
+import { RefreshCw, Send, Search, FileSpreadsheet, ChevronDown, ChevronRight, ExternalLink, AlertTriangle, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   fiscalOperationsService,
@@ -25,10 +25,44 @@ const DOC_TYPES: { code: string; label: string }[] = [
 ]
 const typeLabel = (code: string) => DOC_TYPES.find((t) => t.code === code)?.label ?? code
 
+type SortKey = NonNullable<TenantFiscalSummaryParams['sort']>
+type SortDir = NonNullable<TenantFiscalSummaryParams['dir']>
+
+/** Dirección natural de cada columna (la misma que usa el backend cuando no se indica `dir`). */
+const NATURAL_DIR: Record<SortKey, SortDir> = {
+  to_send: 'desc',
+  emitted: 'desc',
+  accepted: 'desc',
+  sent: 'desc',
+  rejected: 'desc',
+  last_issue: 'desc',
+  name: 'asc',
+  ruc: 'asc',
+  oldest: 'asc',
+  scanned: 'asc',
+}
+
+/** Columnas de la tabla; las que traen `sort` se ordenan al hacer clic en el encabezado. */
+const COLUMNS: { label: string; sort?: SortKey; right?: boolean }[] = [
+  { label: 'Tenant', sort: 'name' },
+  { label: 'RUC', sort: 'ruc' },
+  { label: 'Emitidos', sort: 'emitted', right: true },
+  { label: 'Aceptados', sort: 'accepted', right: true },
+  { label: 'Faltan enviar', sort: 'to_send', right: true },
+  { label: 'En envío', sort: 'sent', right: true },
+  { label: 'Rechazados', sort: 'rejected', right: true },
+  { label: 'Pendiente más antiguo', sort: 'oldest' },
+  { label: 'Último comprobante', sort: 'last_issue' },
+  { label: 'Verificado', sort: 'scanned' },
+  { label: '' },
+]
+
 const SORTS: { v: NonNullable<TenantFiscalSummaryParams['sort']>; l: string }[] = [
   { v: 'to_send', l: 'Más por enviar' },
   { v: 'emitted', l: 'Más emitidos' },
   { v: 'accepted', l: 'Más aceptados' },
+  { v: 'sent', l: 'Más en envío' },
+  { v: 'rejected', l: 'Más rechazados' },
   { v: 'oldest', l: 'Pendiente más antiguo' },
   { v: 'scanned', l: 'Verificado hace más tiempo' },
   { v: 'name', l: 'Nombre (A-Z)' },
@@ -64,7 +98,10 @@ export default function TenantFiscalSummary() {
   const [staleOnly, setStaleOnly] = useState(false)
   const [resendTarget, setResendTarget] = useState<TenantFiscalSummaryRow | null>(null)
   const [resending, setResending] = useState(false)
-  const [sort, setSort] = useState<NonNullable<TenantFiscalSummaryParams['sort']>>('to_send')
+  const [sort, setSort] = useState<SortKey>('to_send')
+  // undefined = la dirección natural de la columna (ver NATURAL_DIR).
+  const [sortDir, setSortDir] = useState<SortDir | undefined>(undefined)
+  const effectiveDir: SortDir = sortDir ?? NATURAL_DIR[sort]
   const [page, setPage] = useState(1)
   const [perPage, setPerPage] = useState(25)
   const [data, setData] = useState<TenantFiscalSummaryResponse | null>(null)
@@ -93,10 +130,11 @@ export default function TenantFiscalSummary() {
       only_pending: onlyPending,
       stale_only: staleOnly,
       sort,
+      dir: sortDir,
       page,
       per_page: perPage,
     }),
-    [preset, from, to, docTypes, rucApplied, qApplied, onlyPending, staleOnly, sort, page, perPage]
+    [preset, from, to, docTypes, rucApplied, qApplied, onlyPending, staleOnly, sort, sortDir, page, perPage]
   )
 
   const load = useCallback(async () => {
@@ -125,6 +163,17 @@ export default function TenantFiscalSummary() {
 
   const toggleType = (code: string) => {
     setDocTypes((prev) => (prev.includes(code) ? prev.filter((c) => c !== code) : [...prev, code]))
+    setPage(1)
+  }
+
+  // Clic en un encabezado: la primera vez ordena en la dirección natural de la columna; otro clic la invierte.
+  const sortBy = (key: SortKey) => {
+    if (key === sort) {
+      setSortDir(effectiveDir === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSort(key)
+      setSortDir(undefined)
+    }
     setPage(1)
   }
 
@@ -350,6 +399,7 @@ export default function TenantFiscalSummary() {
             value={sort}
             onChange={(e) => {
               setSort(e.target.value as typeof sort)
+              setSortDir(undefined)
               setPage(1)
             }}
             aria-label="Ordenar por"
@@ -386,11 +436,35 @@ export default function TenantFiscalSummary() {
           <thead className="bg-slate-50 text-slate-600 text-xs">
             <tr>
               <th className="w-8" />
-              {['Tenant', 'RUC', 'Emitidos', 'Aceptados', 'Faltan enviar', 'En envío', 'Rechazados', 'Pendiente más antiguo', 'Último comprobante', 'Verificado', ''].map((h, i) => (
-                <th key={i} className={`px-3 py-2 font-medium ${i >= 2 && i <= 6 ? 'text-right' : 'text-left'}`}>
-                  {h}
-                </th>
-              ))}
+              {COLUMNS.map((col, i) => {
+                const active = !!col.sort && col.sort === sort
+                return (
+                  <th
+                    key={i}
+                    scope="col"
+                    aria-sort={active ? (effectiveDir === 'asc' ? 'ascending' : 'descending') : col.sort ? 'none' : undefined}
+                    className={`px-3 py-2 font-medium ${col.right ? 'text-right' : 'text-left'}`}
+                  >
+                    {col.sort ? (
+                      <button
+                        type="button"
+                        onClick={() => sortBy(col.sort as SortKey)}
+                        title={`Ordenar por ${col.label.toLowerCase()}${active ? (effectiveDir === 'asc' ? ' (de menor a mayor; clic para invertir)' : ' (de mayor a menor; clic para invertir)') : ''}`}
+                        className={`inline-flex items-center gap-1 hover:text-slate-900 ${col.right ? 'flex-row-reverse' : ''} ${active ? 'text-indigo-700 font-semibold' : ''}`}
+                      >
+                        {col.label}
+                        {active ? (
+                          effectiveDir === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />
+                        ) : (
+                          <ArrowUpDown size={12} className="text-slate-300" />
+                        )}
+                      </button>
+                    ) : (
+                      col.label
+                    )}
+                  </th>
+                )
+              })}
             </tr>
           </thead>
           <tbody>

@@ -186,4 +186,30 @@ describe('TenantFiscalSummary', () => {
     await waitFor(() => expect(screen.getByText('Suspendido')).toBeInTheDocument())
     expect(screen.queryByRole('button', { name: /^reenviar$/i })).not.toBeInTheDocument()
   })
+  it('ordena al hacer clic en el encabezado: dirección natural primero y luego se invierte', async () => {
+    const user = userEvent.setup()
+    render(<TenantFiscalSummary />)
+    await waitFor(() => expect(screen.getByText('Demo SAC')).toBeInTheDocument())
+    const lastCall = () => mocks.getTenantSummary.mock.calls[mocks.getTenantSummary.mock.calls.length - 1][0]
+
+    // Por defecto: faltan enviar (to_send), dirección natural (sin dir) = de mayor a menor.
+    expect(lastCall().sort).toBe('to_send')
+    expect(lastCall().dir).toBeUndefined()
+
+    // Primer clic en Emitidos: esa columna, en su dirección natural (mayor a menor).
+    await user.click(screen.getByRole('button', { name: /^emitidos$/i }))
+    await waitFor(() => expect(lastCall().sort).toBe('emitted'))
+    expect(lastCall().dir).toBeUndefined()
+    expect(screen.getByRole('columnheader', { name: /emitidos/i })).toHaveAttribute('aria-sort', 'descending')
+
+    // Segundo clic: de menor a mayor.
+    await user.click(screen.getByRole('button', { name: /^emitidos$/i }))
+    await waitFor(() => expect(lastCall().dir).toBe('asc'))
+    expect(screen.getByRole('columnheader', { name: /emitidos/i })).toHaveAttribute('aria-sort', 'ascending')
+
+    // Otra columna numérica vuelve a su dirección natural.
+    await user.click(screen.getByRole('button', { name: /^en envío$/i }))
+    await waitFor(() => expect(lastCall().sort).toBe('sent'))
+    expect(lastCall().dir).toBeUndefined()
+  })
 })

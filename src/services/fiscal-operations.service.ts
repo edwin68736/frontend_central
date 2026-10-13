@@ -207,7 +207,9 @@ export interface TenantFiscalSummaryParams {
   q?: string
   only_pending?: boolean
   stale_only?: boolean
-  sort?: 'to_send' | 'emitted' | 'accepted' | 'name' | 'oldest' | 'scanned'
+  sort?: 'to_send' | 'emitted' | 'accepted' | 'sent' | 'rejected' | 'name' | 'ruc' | 'oldest' | 'last_issue' | 'scanned'
+  /** Dirección del orden; vacío = la natural de la columna (números de mayor a menor, nombre A-Z). */
+  dir?: 'asc' | 'desc'
   page?: number
   per_page?: number
 }
