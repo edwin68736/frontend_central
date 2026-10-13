@@ -101,6 +101,11 @@ export interface FiscalFilters {
   /** Mutuamente excluyentes en la UI — separado deliberadamente de `group`/`status` (no es un estado técnico). */
   attended_only?: boolean
   unattended_only?: boolean
+  /**
+   * Incluir los documentos de ambiente demo (SUNAT beta). Por defecto NO: la API recibe `exclude_demo`
+   * (ver apiFilters) y oculta los de empresas en pruebas.
+   */
+  include_demo?: boolean
   /** Pestaña de trabajo (ver FiscalView). */
   view?: FiscalView
   limit?: number
@@ -109,9 +114,15 @@ export interface FiscalFilters {
   include_total?: boolean
 }
 
+/** Traduce el filtro de la UI `include_demo` al `exclude_demo` de la API (por defecto se ocultan los demo). */
+export function apiFilters<T extends { include_demo?: boolean }>(filters: T): Omit<T, 'include_demo'> & { exclude_demo?: boolean } {
+  const { include_demo, ...rest } = filters
+  return include_demo ? rest : { ...rest, exclude_demo: true }
+}
+
 const qs = (filters: FiscalFilters) => {
   const p = new URLSearchParams()
-  Object.entries(filters).forEach(([k, v]) => {
+  Object.entries(apiFilters(filters)).forEach(([k, v]) => {
     if (v === undefined || v === null || v === '') return
     p.set(k, String(v))
   })
@@ -156,7 +167,11 @@ export const fiscalService = {
     payload: { document_uuids?: string[]; filters?: Record<string, unknown>; max?: number }
   ) =>
     api
-      .post<FiscalBulkActionResult>(`/superadmin/fiscal/documents/bulk/${action}`, payload)
+      .post<FiscalBulkActionResult>(`/superadmin/fiscal/documents/bulk/${action}`, {
+        ...payload,
+        // La acción en lote por filtros respeta el mismo criterio demo que la tabla.
+        filters: payload.filters ? apiFilters(payload.filters as { include_demo?: boolean }) : undefined,
+      })
       .then((r) => r.data),
 }
 

@@ -423,6 +423,9 @@ export default function FiscalDocumentsPage() {
   if (filters.from || filters.to)
     chips.push({ key: 'range', label: `Fechas: ${filters.from ?? '…'} → ${filters.to ?? '…'}`, clear: () => setRange() })
   if (filters.document_type) chips.push({ key: 'type', label: `Tipo: ${docTypeLabel(filters.document_type)}`, clear: () => setFilter('document_type', undefined) })
+  if (filters.attended_only) chips.push({ key: 'attended', label: 'Atención: atendidos', clear: () => setFilter('attended_only', undefined) })
+  if (filters.unattended_only) chips.push({ key: 'unattended', label: 'Atención: sin atender', clear: () => setFilter('unattended_only', undefined) })
+  if (filters.include_demo) chips.push({ key: 'demo', label: 'Incluye demo', clear: () => setFilter('include_demo', undefined) })
   if (searchText.trim()) chips.push({ key: 'q', label: `Búsqueda: ${searchText.trim()}`, clear: () => setSearchText('') })
   if (filters.provider) chips.push({ key: 'prov', label: `Proveedor: ${filters.provider}`, clear: () => setFilter('provider', undefined) })
   if (filters.send_mode) chips.push({ key: 'mode', label: `Modo: ${sendModeLabel(filters.send_mode)}`, clear: () => setFilter('send_mode', undefined) })
@@ -732,6 +735,36 @@ export default function FiscalDocumentsPage() {
               className="border border-slate-200 rounded-lg px-2 py-1 text-xs"
               aria-label="Hasta"
             />
+            <select
+              value={filters.attended_only ? 'attended' : filters.unattended_only ? 'unattended' : ''}
+              onChange={(e) =>
+                setFilters((f) => {
+                  const next = { ...f }
+                  delete next.attended_only
+                  delete next.unattended_only
+                  if (e.target.value === 'attended') next.attended_only = true
+                  if (e.target.value === 'unattended') next.unattended_only = true
+                  return next
+                })
+              }
+              className="border border-slate-200 rounded-lg px-2 py-1 text-xs bg-white"
+              aria-label="Atención"
+            >
+              <option value="">Atención: todos</option>
+              <option value="unattended">Sin atender</option>
+              <option value="attended">Atendidos</option>
+            </select>
+            <label
+              className="flex items-center gap-1.5 text-xs text-slate-600"
+              title="Por defecto se ocultan los comprobantes de empresas en ambiente demo (SUNAT beta)"
+            >
+              <input
+                type="checkbox"
+                checked={!!filters.include_demo}
+                onChange={(e) => setFilter('include_demo', e.target.checked)}
+              />
+              Incluir demo
+            </label>
             <button
               type="button"
               onClick={() => setShowAdvanced((v) => !v)}
@@ -888,6 +921,7 @@ export default function FiscalDocumentsPage() {
                 <th className="px-3 py-2">Cliente</th>
                 <th className="px-3 py-2">Emisión (Lima)</th>
                 <th className="px-3 py-2">Estado</th>
+                <th className="px-3 py-2">Atención</th>
                 <th className="px-3 py-2">Detalle / motivo</th>
                 <th className="px-3 py-2 text-right">Monto</th>
                 <th className="px-3 py-2">Email</th>
@@ -898,7 +932,7 @@ export default function FiscalDocumentsPage() {
             <tbody>
               {items.length === 0 && (
                 <tr>
-                  <td colSpan={11} className="px-3 py-12 text-center text-slate-400">
+                  <td colSpan={12} className="px-3 py-12 text-center text-slate-400">
                     {tab === 'pending' ? 'No hay documentos pendientes de gestión con estos filtros.' : 'Sin documentos en el historial con estos filtros.'}
                   </td>
                 </tr>
@@ -933,8 +967,19 @@ export default function FiscalDocumentsPage() {
                     <td className="px-3 py-2">
                       <div className="flex flex-col items-start gap-1">
                         <Badge variant={g.variant}>{g.label}</Badge>
-                        {d.attended && <Badge variant={ab.variant}>{ab.label}</Badge>}
+                        {d.sunat_mode === 'beta' && <Badge variant="gray">Demo</Badge>}
                       </div>
+                    </td>
+                    <td className="px-3 py-2 text-xs">
+                      {d.attended ? (
+                        <span title={[d.attended_by, d.attended_at ? formatLima(d.attended_at) : '', d.attended_reason].filter(Boolean).join(' · ')}>
+                          <Badge variant={ab.variant}>{ab.label}</Badge>
+                        </span>
+                      ) : isAttendable(d.status) && !(d.status === 'error' && d.error_type === 'transient') ? (
+                        <Badge variant="yellow">Sin atender</Badge>
+                      ) : (
+                        <span className="text-slate-300">—</span>
+                      )}
                     </td>
                     <td className="px-3 py-2 max-w-[220px] text-xs text-slate-500">
                       <span className="line-clamp-2" title={failure}>
