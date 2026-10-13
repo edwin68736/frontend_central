@@ -11,6 +11,7 @@ import { Card, CardBody, CardHeader } from '@/components/ui/Card'
 import Modal from '@/components/ui/Modal'
 import Badge from '@/components/ui/Badge'
 import { DATE_PRESETS, DatePreset, agoText, rangeForPreset, formatLima, limaDate } from '@/lib/fiscalFilters'
+import { exportTableToExcel, type ExportColumn } from '@/utils/exportExcel'
 
 const PAGE_SIZES = [25, 50, 100]
 
@@ -224,34 +225,43 @@ export default function TenantFiscalSummary() {
     }
   }
 
-  const exportCsv = async () => {
+  // Exporta a Excel TODA la lista con los filtros y el orden actuales (no solo la página visible).
+  const exportExcel = async () => {
     setExporting(true)
     try {
       const all: TenantFiscalSummaryRow[] = []
-      for (let p = 1; p <= 20; p++) {
+      for (let p = 1; p <= 200; p++) {
         const res = await fiscalOperationsService.getTenantSummary({ ...params, page: p, per_page: 100 })
         all.push(...(res?.items ?? []))
-        if (!res || all.length >= res.total) break
+        if (!res || all.length >= res.total || (res.items ?? []).length === 0) break
       }
-      const cell = (v: unknown) => {
-        const s = v === null || v === undefined ? '' : String(v)
-        return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
-      }
-      const head = ['Tenant', 'RUC', 'Estado tenant', 'Emitidos', 'Aceptados', 'Faltan enviar', 'En envío', 'Rechazados', 'Pendiente más antiguo', 'Último comprobante', 'Verificado', 'Error de escaneo']
-      const lines = all.map((r) =>
-        [r.name, r.ruc, r.tenant_status, r.emitted, r.accepted, r.to_send, r.sent, r.rejected, r.oldest_open_at?.slice(0, 10), r.last_issue_at?.slice(0, 10), formatLima(r.scanned_at), r.scan_error]
-          .map(cell)
-          .join(',')
+      const day = (iso?: string | null) => (iso ? iso.slice(0, 10) : '')
+      const columns: ExportColumn<TenantFiscalSummaryRow>[] = [
+        { key: 'name', label: 'Tenant' },
+        { key: 'slug', label: 'Slug' },
+        { key: 'ruc', label: 'RUC' },
+        { key: 'tenant_status', label: 'Estado tenant' },
+        { key: 'emitted', label: 'Emitidos', excelNumber: true },
+        { key: 'accepted', label: 'Aceptados', excelNumber: true },
+        { key: 'to_send', label: 'Faltan enviar', excelNumber: true },
+        { key: 'sent', label: 'En envío', excelNumber: true },
+        { key: 'rejected', label: 'Rechazados', excelNumber: true },
+        { key: 'open_to_send', label: 'Pendientes totales (sin rango)', excelNumber: true },
+        { key: 'oldest_open_at', label: 'Pendiente más antiguo', format: (v) => day(v as string | null) },
+        { key: 'oldest_open_at', label: 'Antigüedad (días)', format: (v) => ageDays(v as string | null) ?? '' },
+        { key: 'last_issue_at', label: 'Último comprobante', format: (v) => day(v as string | null) },
+        { key: 'scanned_at', label: 'Verificado (Lima)', format: (v) => (v ? formatLima(v as string) : '') },
+        { key: 'scan_error', label: 'Error de escaneo' },
+      ]
+      await exportTableToExcel(
+        'Comprobantes por tenant',
+        columns,
+        all,
+        `resumen-fiscal-tenants-${limaDate(new Date())}.xlsx`
       )
-      const blob = new Blob(['﻿' + [head.join(','), ...lines].join('\r\n')], { type: 'text/csv;charset=utf-8' })
-      const url = window.URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `resumen-fiscal-tenants-${limaDate(new Date())}.csv`
-      a.click()
-      window.URL.revokeObjectURL(url)
+      toast.success(`Excel generado: ${all.length.toLocaleString()} tenant(s)`)
     } catch {
-      toast.error('No se pudo exportar')
+      toast.error('No se pudo exportar a Excel')
     } finally {
       setExporting(false)
     }
@@ -272,11 +282,11 @@ export default function TenantFiscalSummary() {
         </div>
         <button
           type="button"
-          onClick={exportCsv}
+          onClick={exportExcel}
           disabled={exporting}
           className="ml-auto inline-flex items-center gap-1 px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-40"
         >
-          <FileSpreadsheet size={13} /> {exporting ? 'Exportando…' : 'Exportar CSV'}
+          <FileSpreadsheet size={13} /> {exporting ? 'Exportando…' : 'Exportar a Excel'}
         </button>
       </CardHeader>
 

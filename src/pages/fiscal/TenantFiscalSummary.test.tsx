@@ -5,6 +5,9 @@ import TenantFiscalSummary from './TenantFiscalSummary'
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
+const exportMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
+vi.mock('@/utils/exportExcel', () => ({ exportTableToExcel: exportMock }))
+
 const mocks = vi.hoisted(() => ({
   getTenantSummary: vi.fn(),
   refreshTenantSummary: vi.fn(),
@@ -211,5 +214,28 @@ describe('TenantFiscalSummary', () => {
     await user.click(screen.getByRole('button', { name: /^en envío$/i }))
     await waitFor(() => expect(lastCall().sort).toBe('sent'))
     expect(lastCall().dir).toBeUndefined()
+  })
+  it('Exportar a Excel trae TODA la lista (todas las páginas) con los filtros actuales', async () => {
+    const user = userEvent.setup()
+    const mkRow = (id: number) => ({ ...row, tenant_id: id, name: 'T' + id, slug: 't' + id })
+    mocks.getTenantSummary.mockImplementation(async (p: { page?: number; per_page?: number }) => {
+      const page = p.page ?? 1
+      const per = p.per_page ?? 25
+      const all = Array.from({ length: 230 }, (_, i) => mkRow(i + 1))
+      return { ...response, items: all.slice((page - 1) * per, page * per), total: 230, page, per_page: per }
+    })
+    exportMock.mockClear()
+    render(<TenantFiscalSummary />)
+    await waitFor(() => expect(screen.getByText('T1')).toBeInTheDocument())
+    expect(screen.queryByText(/exportar csv/i)).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /exportar a excel/i }))
+    await waitFor(() => expect(exportMock).toHaveBeenCalledTimes(1))
+    const [sheet, columns, rows, filename] = exportMock.mock.calls[0]
+    expect(sheet).toBe('Comprobantes por tenant')
+    expect(rows).toHaveLength(230)
+    expect(filename).toMatch(/^resumen-fiscal-tenants-\d{4}-\d{2}-\d{2}\.xlsx$/)
+    const labels = (columns as { label: string }[]).map((c) => c.label)
+    expect(labels).toEqual(expect.arrayContaining(['Emitidos', 'Aceptados', 'Faltan enviar', 'En envío', 'Rechazados']))
   })
 })
