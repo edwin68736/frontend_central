@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { Search } from 'lucide-react'
+import { RotateCcw, Search } from 'lucide-react'
 import PaginationBar from '@/components/ui/PaginationBar'
 import type { PerPageOption } from '@/services/pagination'
 import Spinner from '@/components/ui/Spinner'
@@ -8,6 +8,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { equiposOrders, type OrderFilter, type OrderListResult } from '@/services/equiposOrders.service'
 import { apiError, INPUT } from './common'
 import OrderDetail from './OrderDetail'
+import ReturnModal from './ReturnModal'
 import { useDebounced } from './hooks'
 import { AgencyBadge, AgencyDays, fmtDate, money, PaymentBadge, SELECT, UserBadge } from './ordersCommon'
 
@@ -28,6 +29,8 @@ export default function AgencyOrdersTab() {
   const [loading, setLoading] = useState(true)
   const [failed, setFailed] = useState(false)
   const [detailId, setDetailId] = useState<number | null>(null)
+  const [returnId, setReturnId] = useState<number | null>(null)
+  const canReturn = useAuth().hasPermission('equipos.returns')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -67,7 +70,10 @@ export default function AgencyOrdersTab() {
         </label>
       </div>
       <p className="text-sm text-slate-500">
-        {showAll ? 'Todos los pedidos registrados, los que están en agencia primero.' : 'Pedidos en agencia con fecha de llegada, de más a menos días.'} A los 15 días en agencia corresponde el retorno: abre el pedido para registrarlo.
+        {showAll
+          ? 'Orden: en agencia con fecha de llegada (más días primero), en agencia sin fecha de llegada (por revisar), pendientes o en tránsito, y al final los entregados y en retorno.'
+          : 'Pedidos en agencia con fecha de llegada, de más a menos días.'}{' '}
+        A los 15 días en agencia corresponde el retorno. Los pedidos recogidos o retornados salen de la vista por defecto.
       </p>
 
       <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
@@ -77,7 +83,7 @@ export default function AgencyOrdersTab() {
               <tr className="text-left text-xs text-slate-500 border-b border-slate-200 bg-slate-50">
                 <th className="px-3 py-2">Pedido</th><th className="px-3">Cliente</th><th className="px-3">Agencia / transportista</th><th className="px-3">Usuario</th>
                 <th className="px-3">Llegada</th><th className="px-3 text-right">Días/agencia</th><th className="px-3 text-right">Días para el retorno</th>
-                {canSeeMoney && <th className="px-3 text-right">Total</th>}{canSeeMoney && <th className="px-3 text-right">Saldo</th>}<th className="px-3">Pago</th><th className="px-3">Semáforo</th>
+                {canSeeMoney && <th className="px-3 text-right">Total</th>}{canSeeMoney && <th className="px-3 text-right">Saldo</th>}<th className="px-3">Pago</th><th className="px-3">Semáforo</th>{canReturn && <th className="px-3"></th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -94,11 +100,18 @@ export default function AgencyOrdersTab() {
                   {canSeeMoney && <td className={`px-3 text-right whitespace-nowrap ${r.balance_amount > 0 ? 'text-red-700 font-medium' : 'text-slate-400'}`}>{money(r.balance_amount)}</td>}
                   <td className="px-3"><PaymentBadge value={r.payment_status} /></td>
                   <td className="px-3"><AgencyBadge level={r.agency_level} label={r.agency_label} /></td>
+                  {canReturn && (
+                    <td className="px-3" onClick={(e) => e.stopPropagation()}>
+                      {(r.shipment_status === 'en_agencia' || r.shipment_status === 'en_transito') && (
+                        <button type="button" className="inline-flex items-center gap-1 whitespace-nowrap rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50" onClick={() => setReturnId(r.id)}><RotateCcw size={13} /> Registrar retorno</button>
+                      )}
+                    </td>
+                  )}
                 </tr>
               ))}
-              {failed && !data && <tr><td colSpan={canSeeMoney ? 11 : 9} className="text-center text-red-600 py-12">No se pudieron cargar los pedidos. <button type="button" className="underline" onClick={() => void load()}>Reintentar</button></td></tr>}
+              {failed && !data && <tr><td colSpan={(canSeeMoney ? 11 : 9) + (canReturn ? 1 : 0)} className="text-center text-red-600 py-12">No se pudieron cargar los pedidos. <button type="button" className="underline" onClick={() => void load()}>Reintentar</button></td></tr>}
               {data && data.rows.length === 0 && (
-                <tr><td colSpan={canSeeMoney ? 11 : 9} className="text-center text-slate-400 py-12">{showAll ? 'No hay pedidos con esos filtros.' : 'No hay pedidos en agencia con esos filtros.'}</td></tr>
+                <tr><td colSpan={(canSeeMoney ? 11 : 9) + (canReturn ? 1 : 0)} className="text-center text-slate-400 py-12">{showAll ? 'No hay pedidos con esos filtros.' : 'No hay pedidos en agencia con esos filtros.'}</td></tr>
               )}
             </tbody>
           </table>
@@ -107,6 +120,7 @@ export default function AgencyOrdersTab() {
 
       {data && <PaginationBar page={page} perPage={perPage} total={data.total} totalPages={pages} onPageChange={setPage} onPerPageChange={(n) => { setPerPage(n); setPage(1) }} itemLabel="pedidos" />}
 
+      <ReturnModal open={returnId != null} orderId={returnId} onClose={() => setReturnId(null)} onDone={() => void load()} />
       <OrderDetail orderId={detailId} onClose={() => setDetailId(null)} onChanged={() => void load()} onEdit={() => setDetailId(null)} />
     </div>
   )
