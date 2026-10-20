@@ -13,7 +13,7 @@ import { buildShippingLabel, openLabel } from './shippingLabel'
 import { useConfirm, type ConfirmOptions, type ConfirmResult } from './ConfirmProvider'
 import PaymentModal from './PaymentModal'
 import ArrivalModal from './ArrivalModal'
-import { equiposControl } from '@/services/equiposControl.service'
+import ReturnModal from './ReturnModal'
 import { waLink, waText, WA_LABEL, type WaKind } from './whatsapp'
 
 interface Props {
@@ -32,7 +32,6 @@ export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Pro
   const confirm = useConfirm()
   const [retOpen, setRetOpen] = useState(false)
   const [arrOpen, setArrOpen] = useState(false)
-  const [ret, setRet] = useState({ cost: '0', condition: 'buen_estado' as 'buen_estado' | 'danado', notes: '' })
 
   const can = (p: string) => hasPermission(p)
 
@@ -79,22 +78,6 @@ export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Pro
     const blob = buildShippingLabel(o)
     if (!openLabel(blob)) toast.error('El navegador bloqueó la ventana del rótulo; permite las ventanas emergentes')
     try { await equiposOrders.labelPrinted(o.id); void load(); onChanged() } catch { /* no crítico */ }
-  }
-
-  const saveReturn = async () => {
-    if (!o) return
-    setBusy(true)
-    try {
-      await equiposControl.createReturn({ order_id: o.id, return_cost: Number(ret.cost) || 0, condition: ret.condition, notes: ret.notes })
-      toast.success('Retorno registrado')
-      setRetOpen(false)
-      void load()
-      onChanged()
-    } catch (e) {
-      toast.error(apiError(e, 'No se pudo registrar el retorno'))
-    } finally {
-      setBusy(false)
-    }
   }
 
   const sh = o?.shipment ?? null
@@ -279,17 +262,7 @@ export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Pro
       <ArrivalModal open={arrOpen} busy={busy} onClose={() => setArrOpen(false)}
         onConfirm={(d) => { setArrOpen(false); void act(() => equiposOrders.arrived(o!.id, d), 'Llegada registrada') }} />
 
-      <Modal open={retOpen} onClose={() => setRetOpen(false)} title="Registrar retorno">
-        <div className="space-y-3">
-          <p className="text-sm text-slate-600">Se devuelve todo el pedido; el envío pasa a «en retorno». Al recibirlo en buen estado, los equipos vuelven al stock (Retornos).</p>
-          <div className="grid grid-cols-2 gap-3">
-            <div><label className="block text-sm font-medium text-slate-700 mb-1">Condición</label><select value={ret.condition} onChange={(e) => setRet({ ...ret, condition: e.target.value as 'buen_estado' | 'danado' })} className={INPUT}><option value="buen_estado">Buen estado</option><option value="danado">Dañado</option></select></div>
-            <div><label className="block text-sm font-medium text-slate-700 mb-1">Costo del retorno</label><input type="number" min={0} step="0.01" value={ret.cost} onChange={(e) => setRet({ ...ret, cost: e.target.value })} className={INPUT} /></div>
-          </div>
-          <input value={ret.notes} onChange={(e) => setRet({ ...ret, notes: e.target.value })} placeholder="Observaciones" className={INPUT} />
-          <div className="flex justify-end gap-2"><button type="button" className={BTN_SECONDARY} onClick={() => setRetOpen(false)}>Cancelar</button><button type="button" className={BTN_PRIMARY} disabled={busy} onClick={() => void saveReturn()}>Registrar</button></div>
-        </div>
-      </Modal>
+      <ReturnModal open={retOpen} orderId={o?.id ?? null} onClose={() => setRetOpen(false)} onDone={() => { void load(); onChanged() }} />
 
     </>
   )

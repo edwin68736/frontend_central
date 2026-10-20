@@ -133,7 +133,7 @@ const pinHeader = (pin?: string) => (pin ? { headers: { 'X-Security-Pin': pin } 
 
 export const equiposControl = {
   listReturns: (status?: string) => api.get<{ data: EquipReturnView[] }>(`${base}/returns`, { params: { status } }).then((r) => r.data.data ?? []),
-  createReturn: (b: ReturnInput) => api.post<{ data: EquipReturnView }>(`${base}/returns`, b).then((r) => r.data.data),
+  createReturn: (b: ReturnInput, pin?: string) => api.post<{ data: EquipReturnView }>(`${base}/returns`, b, pin ? { headers: { 'X-Security-Pin': pin } } : undefined).then((r) => r.data.data),
   updateReturn: (id: number, b: ReturnUpdate) => api.put<{ data: EquipReturnView }>(`${base}/returns/${id}`, b).then((r) => r.data.data),
   reship: (id: number) => api.post<{ data: OrderView }>(`${base}/returns/${id}/reship`).then((r) => r.data.data),
 
