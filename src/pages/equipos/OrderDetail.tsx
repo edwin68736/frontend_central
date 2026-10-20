@@ -8,10 +8,11 @@ import {
   DELIVERY_MODE_LABEL, equiposOrders, METHOD_LABEL, negativeStockItems, SALE_TYPE_LABEL, type OrderView,
 } from '@/services/equiposOrders.service'
 import { apiError, BTN_PRIMARY, BTN_SECONDARY, formatDateTime, INPUT } from './common'
-import { AlertBadge, fmtDate, money, PaymentBadge, ShipmentBadge, StatusBadge, UserBadge, ValidationBadge } from './ordersCommon'
+import { fmtDate, money, PaymentBadge, ShipmentBadge, StatusBadge, UserBadge, ValidationBadge } from './ordersCommon'
 import { buildShippingLabel, openLabel } from './shippingLabel'
 import { useConfirm, type ConfirmOptions, type ConfirmResult } from './ConfirmProvider'
 import PaymentModal from './PaymentModal'
+import ArrivalModal from './ArrivalModal'
 import { equiposControl } from '@/services/equiposControl.service'
 import { waLink, waText, WA_LABEL, type WaKind } from './whatsapp'
 
@@ -30,6 +31,7 @@ export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Pro
   const [payOpen, setPayOpen] = useState(false)
   const confirm = useConfirm()
   const [retOpen, setRetOpen] = useState(false)
+  const [arrOpen, setArrOpen] = useState(false)
   const [ret, setRet] = useState({ cost: '0', condition: 'buen_estado' as 'buen_estado' | 'danado', notes: '' })
 
   const can = (p: string) => hasPermission(p)
@@ -116,7 +118,6 @@ export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Pro
               <ValidationBadge value={o.validation_status} />
               <PaymentBadge value={o.payment_status} />
               {sh && <ShipmentBadge value={sh.status} />}
-              {sh && <AlertBadge alert={sh.alert} since={sh.days_since_arrival} left={sh.days_left} />}
               <UserBadge id={o.created_by} name={o.created_by_name} />
               <span className="text-xs text-slate-500 ml-auto">{SALE_TYPE_LABEL[o.sale_type]} · {fmtDate(o.order_date)}</span>
             </div>
@@ -147,7 +148,7 @@ export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Pro
                       {sh.tracking_url && <a href={sh.tracking_url} target="_blank" rel="noreferrer" className="ml-2 text-indigo-600 inline-flex items-center gap-0.5">seguir <ExternalLink size={12} /></a>}
                     </p>
                     <p className="text-slate-500 text-xs">
-                      Programado {fmtDate(sh.scheduled_dispatch_date)} · Despachado {fmtDate(sh.dispatched_at)} · Llegó {fmtDate(sh.arrived_at)}
+                      Programado {fmtDate(sh.scheduled_dispatch_date)} · Despachado {fmtDate(sh.dispatched_at)} · Llegó {sh.arrived_at ? fmtDate(sh.arrived_at) : (sh.status === 'en_agencia' ? 'sin fecha registrada' : '—')}
                       {sh.pickup_deadline ? ` · Vence ${fmtDate(sh.pickup_deadline)}` : ''}{sh.picked_up_at ? ` · Recogido ${fmtDate(sh.picked_up_at)}` : ''}
                     </p>
                     {sh.dispatch_day_notice && <p className="text-xs text-amber-700">{sh.dispatch_day_notice}</p>}
@@ -237,7 +238,7 @@ export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Pro
                 <button type="button" className={BTN_PRIMARY} disabled={busy || o.validation_status !== 'validado'} title={o.validation_status !== 'validado' ? 'Primero valida los datos del pedido' : ''} onClick={() => void guard({ title: 'Despachar pedido', message: `El pedido N° ${o.order_number} saldrá por ${sh?.carrier_name || 'el transportista'} con la guía ${sh?.guide_number || 's/n'}.`, confirmLabel: 'Despachar' }, () => equiposOrders.dispatch(o.id), 'Pedido despachado')}><Truck size={15} /> Despachar</button>
               )}
               {sh?.status === 'en_transito' && can('equipos.shipments') && (
-                <button type="button" className={BTN_PRIMARY} disabled={busy} onClick={() => void guard({ title: 'Registrar llegada', message: 'El paquete llegó a la agencia de destino. Desde hoy corre el plazo de recojo.', confirmLabel: 'Registrar llegada' }, () => equiposOrders.arrived(o.id), 'Llegada registrada')}>Marcar llegada a agencia</button>
+                <button type="button" className={BTN_PRIMARY} disabled={busy} onClick={() => setArrOpen(true)}>Marcar llegada a agencia</button>
               )}
               {(sh?.status === 'en_agencia' || sh?.status === 'en_transito') && can('equipos.shipments') && (
                 <button type="button" className={BTN_SECONDARY} disabled={busy} onClick={() => void guard({ title: 'Cliente recogió', message: o.balance_amount > 0 ? `El cliente aún debe ${money(o.balance_amount)}. Se registrará el recojo igualmente.` : 'Se registrará que el cliente recogió el paquete.', confirmLabel: 'Registrar recojo' }, () => equiposOrders.pickedUp(o.id), 'Recojo registrado')}>Cliente recogió</button>
@@ -274,6 +275,9 @@ export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Pro
         open={payOpen} onClose={() => setPayOpen(false)} onSaved={() => { void load(); onChanged() }}
         customerId={o?.customer_id ?? null} customerName={o?.customer_name ?? ''} orderId={o?.id} suggestedAmount={o && o.balance_amount > 0 ? o.balance_amount : undefined}
       />
+
+      <ArrivalModal open={arrOpen} busy={busy} onClose={() => setArrOpen(false)}
+        onConfirm={(d) => { setArrOpen(false); void act(() => equiposOrders.arrived(o!.id, d), 'Llegada registrada') }} />
 
       <Modal open={retOpen} onClose={() => setRetOpen(false)} title="Registrar retorno">
         <div className="space-y-3">
