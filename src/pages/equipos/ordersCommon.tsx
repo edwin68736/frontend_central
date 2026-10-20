@@ -111,6 +111,19 @@ const AGENCY_STYLE: Record<string, string> = {
   critico: 'bg-red-600 text-white border-red-600',
   sin_fecha: 'bg-slate-100 text-slate-500 border-slate-200',
 }
+const AGENCY_TEXT_STYLE: Record<string, string> = {
+  verde: 'text-emerald-600',
+  amarillo: 'text-amber-600',
+  rojo: 'text-red-600',
+  critico: 'text-red-700 underline decoration-2 underline-offset-2',
+  sin_fecha: 'text-slate-400',
+}
+/** Días en agencia como número coloreado con el mismo nivel del semáforo (sin badge); el nivel lo decide el servidor. */
+export function AgencyDays({ days, level }: { days: number | null; level: string }) {
+  if (days == null) return <span className="text-slate-300">—</span>
+  return <span className={`font-bold tabular-nums ${AGENCY_TEXT_STYLE[level] ?? AGENCY_TEXT_STYLE.sin_fecha}`}>{days}</span>
+}
+
 /** Semáforo del plazo de retorno en agencia: color + texto (el servidor decide nivel y etiqueta). */
 export function AgencyBadge({ level, label }: { level: string; label: string }) {
   if (!level) return <span className="text-slate-300">—</span>

@@ -9,7 +9,7 @@ import { equiposOrders, type OrderFilter, type OrderListResult } from '@/service
 import { apiError, INPUT } from './common'
 import OrderDetail from './OrderDetail'
 import { useDebounced } from './hooks'
-import { AgencyBadge, fmtDate, money, PaymentBadge, SELECT, UserBadge } from './ordersCommon'
+import { AgencyBadge, AgencyDays, fmtDate, money, PaymentBadge, SELECT, UserBadge } from './ordersCommon'
 
 /**
  * Pedido-agencia: gestión de los paquetes que llegaron a la agencia. Regla de negocio: a los 15 días en agencia
@@ -76,7 +76,7 @@ export default function AgencyOrdersTab() {
             <thead>
               <tr className="text-left text-xs text-slate-500 border-b border-slate-200 bg-slate-50">
                 <th className="px-3 py-2">Pedido</th><th className="px-3">Cliente</th><th className="px-3">Agencia / transportista</th><th className="px-3">Usuario</th>
-                <th className="px-3">Llegada</th><th className="px-3 text-right">Días en agencia</th><th className="px-3 text-right">Días para el retorno</th>
+                <th className="px-3">Llegada</th><th className="px-3 text-right">Días/agencia</th><th className="px-3 text-right">Días para el retorno</th>
                 {canSeeMoney && <th className="px-3 text-right">Total</th>}{canSeeMoney && <th className="px-3 text-right">Saldo</th>}<th className="px-3">Pago</th><th className="px-3">Semáforo</th>
               </tr>
             </thead>
@@ -88,7 +88,7 @@ export default function AgencyOrdersTab() {
                   <td className="px-3 text-slate-600">{r.carrier_name || '—'}{r.destination_agency && <span className="block text-xs text-slate-400">{r.destination_agency}{r.guide_number ? ` · ${r.guide_number}` : ''}</span>}</td>
                   <td className="px-3"><UserBadge id={r.created_by} name={r.created_by_name} /></td>
                   <td className="px-3 whitespace-nowrap text-slate-600">{r.arrived_at ? fmtDate(r.arrived_at) : '—'}</td>
-                  <td className="px-3 text-right tabular-nums">{r.days_in_agency ?? '—'}</td>
+                  <td className="px-3 text-right"><AgencyDays days={r.days_in_agency} level={r.agency_level} /></td>
                   <td className="px-3 text-right tabular-nums">{r.days_left ?? '—'}</td>
                   {canSeeMoney && <td className="px-3 text-right whitespace-nowrap">{money(r.total_amount)}</td>}
                   {canSeeMoney && <td className={`px-3 text-right whitespace-nowrap ${r.balance_amount > 0 ? 'text-red-700 font-medium' : 'text-slate-400'}`}>{money(r.balance_amount)}</td>}
