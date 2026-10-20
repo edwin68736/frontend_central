@@ -215,6 +215,12 @@ export interface OrderRow {
   summary: string
   created_by: number | null
   created_by_name: string
+  destination_agency: string
+  arrived_at: string | null
+  days_in_agency: number | null
+  days_left: number | null
+  agency_level: 'verde' | 'amarillo' | 'rojo' | 'critico' | 'sin_fecha' | ''
+  agency_label: string
 }
 
 export interface OrderListResult {
@@ -238,6 +244,8 @@ export interface OrderFilter {
   carrier_id?: number
   department?: string
   created_by?: number | 'none'
+  agency?: 'con_llegada'
+  sort?: 'agency_days'
   page?: number
   per_page?: number
 }

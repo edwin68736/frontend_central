@@ -103,3 +103,16 @@ export function UserBadge({ id, name }: { id: number | null | undefined; name?: 
   if (id == null) return <span className={`${PILL} bg-slate-100 text-slate-500 border-slate-200`}>Sin usuario</span>
   return <span className={`${PILL} max-w-36 truncate ${userBadgeStyle(id)}`} title={name || `Usuario #${id}`}>{name || `Usuario #${id}`}</span>
 }
+
+const AGENCY_STYLE: Record<string, string> = {
+  verde: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  amarillo: 'bg-amber-50 text-amber-700 border-amber-200',
+  rojo: 'bg-red-50 text-red-700 border-red-200',
+  critico: 'bg-red-600 text-white border-red-600',
+  sin_fecha: 'bg-slate-100 text-slate-500 border-slate-200',
+}
+/** Semáforo del plazo de retorno en agencia: color + texto (el servidor decide nivel y etiqueta). */
+export function AgencyBadge({ level, label }: { level: string; label: string }) {
+  if (!level) return <span className="text-slate-300">—</span>
+  return <span className={`${PILL} ${AGENCY_STYLE[level] ?? AGENCY_STYLE.sin_fecha}`}>{label}</span>
+}
