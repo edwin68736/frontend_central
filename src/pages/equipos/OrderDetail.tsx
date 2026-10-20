@@ -8,7 +8,7 @@ import {
   DELIVERY_MODE_LABEL, equiposOrders, METHOD_LABEL, negativeStockItems, SALE_TYPE_LABEL, type OrderView,
 } from '@/services/equiposOrders.service'
 import { apiError, BTN_PRIMARY, BTN_SECONDARY, formatDateTime, INPUT } from './common'
-import { AlertBadge, fmtDate, money, PaymentBadge, ShipmentBadge, StatusBadge, ValidationBadge } from './ordersCommon'
+import { AlertBadge, fmtDate, money, PaymentBadge, ShipmentBadge, StatusBadge, UserBadge, ValidationBadge } from './ordersCommon'
 import { buildShippingLabel, openLabel } from './shippingLabel'
 import { useConfirm, type ConfirmOptions, type ConfirmResult } from './ConfirmProvider'
 import PaymentModal from './PaymentModal'
@@ -117,6 +117,7 @@ export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Pro
               <PaymentBadge value={o.payment_status} />
               {sh && <ShipmentBadge value={sh.status} />}
               {sh && <AlertBadge alert={sh.alert} since={sh.days_since_arrival} left={sh.days_left} />}
+              <UserBadge id={o.created_by} name={o.created_by_name} />
               <span className="text-xs text-slate-500 ml-auto">{SALE_TYPE_LABEL[o.sale_type]} · {fmtDate(o.order_date)}</span>
             </div>
 

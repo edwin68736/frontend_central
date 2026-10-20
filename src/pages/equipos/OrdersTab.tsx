@@ -13,7 +13,7 @@ import OrderDetail from './OrderDetail'
 import { useDebounced } from './hooks'
 import { printLabelsFor } from './printLabels'
 import OrderEditor from './OrderEditor'
-import { fmtDate, money, PaymentBadge, SELECT, ShipmentBadge, StatusBadge, ValidationBadge } from './ordersCommon'
+import { fmtDate, money, PaymentBadge, SELECT, ShipmentBadge, StatusBadge, UserBadge, ValidationBadge } from './ordersCommon'
 
 export default function OrdersTab() {
   const { hasPermission } = useAuth()
@@ -27,6 +27,7 @@ export default function OrdersTab() {
   const [printing, setPrinting] = useState(false)
   const dq = useDebounced(q, 450)
   const canShip = hasPermission('equipos.shipments')
+  const [users, setUsers] = useState<{ id: number; name: string }[]>([])
   const [data, setData] = useState<OrderListResult | null>(null)
   const [loading, setLoading] = useState(true)
   const [detailId, setDetailId] = useState<number | null>(null)
@@ -44,6 +45,7 @@ export default function OrdersTab() {
   }, [filter, dq, page, perPage])
 
   useEffect(() => { void load() }, [load])
+  useEffect(() => { equiposOrders.listOrderUsers().then(setUsers).catch(() => setUsers([])) }, [data?.total])
 
   const setF = (patch: Partial<OrderFilter>) => { setPage(1); setFilter((f) => ({ ...f, ...patch })) }
   const pages = data ? Math.max(1, Math.ceil(data.total / perPage)) : 1
@@ -79,6 +81,11 @@ export default function OrdersTab() {
           <option value="">Todo envío</option>
           {Object.entries(SHIPMENT_STATUS_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
+        <select aria-label="Usuario" value={String(filter.created_by ?? '')} onChange={(e) => setF({ created_by: e.target.value === 'none' ? 'none' : e.target.value ? Number(e.target.value) : undefined })} className={SELECT}>
+          <option value="">Todos los usuarios</option>
+          {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+          <option value="none">Sin usuario</option>
+        </select>
         <input type="date" aria-label="Desde" value={filter.from ?? ''} onChange={(e) => setF({ from: e.target.value || undefined })} className={SELECT} />
         <input type="date" aria-label="Hasta" value={filter.to ?? ''} onChange={(e) => setF({ to: e.target.value || undefined })} className={SELECT} />
         {canShip && selected.size > 0 && <button type="button" className={BTN_PRIMARY} disabled={printing} onClick={() => void printSelected()}><Printer size={16} /> {printing ? 'Generando…' : `Imprimir rótulos (${selected.size})`}</button>}
@@ -105,7 +112,7 @@ export default function OrdersTab() {
               <tr className="text-left text-xs text-slate-500 border-b border-slate-200 bg-slate-50">
                 {canShip && <th className="px-3 py-2 w-8"><input type="checkbox" aria-label="Seleccionar la página" checked={allOnPage} onChange={togglePage} className="rounded" /></th>}<th className="px-3 py-2">N°</th><th className="px-3">Fecha</th><th className="px-3">Cliente</th><th className="px-3">Detalle</th>
                 {canSeeMoney && <th className="px-3 text-right">Total</th>}{canSeeMoney && <th className="px-3 text-right">Saldo</th>}
-                <th className="px-3">Estado</th><th className="px-3">Pago</th><th className="px-3">Envío</th>
+                <th className="px-3">Usuario</th><th className="px-3">Estado</th><th className="px-3">Pago</th><th className="px-3">Envío</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -118,13 +125,14 @@ export default function OrdersTab() {
                   <td className="px-3 text-slate-600 max-w-xs truncate" title={r.summary}>{r.summary}{r.is_gift && <span className="ml-1 text-xs text-emerald-700">(obsequio)</span>}</td>
                   {canSeeMoney && <td className="px-3 text-right whitespace-nowrap">{money(r.total_amount)}</td>}
                   {canSeeMoney && <td className={`px-3 text-right whitespace-nowrap ${r.balance_amount > 0 ? 'text-red-700 font-medium' : 'text-slate-400'}`}>{money(r.balance_amount)}</td>}
+                  <td className="px-3"><UserBadge id={r.created_by} name={r.created_by_name} /></td>
                   <td className="px-3"><div className="flex flex-col gap-1 items-start"><StatusBadge value={r.status} />{r.status === 'registrado' && <ValidationBadge value={r.validation_status} />}</div></td>
                   <td className="px-3"><PaymentBadge value={r.payment_status} /></td>
                   <td className="px-3"><ShipmentBadge value={r.shipment_status} />{r.carrier_name && <span className="block text-xs text-slate-400">{r.carrier_name}{r.guide_number ? ` · ${r.guide_number}` : ''}</span>}</td>
                 </tr>
               ))}
               {data && data.rows.length === 0 && (
-                <tr><td colSpan={10} className="text-center text-slate-400 py-12">No hay pedidos con esos filtros.</td></tr>
+                <tr><td colSpan={11} className="text-center text-slate-400 py-12">No hay pedidos con esos filtros.</td></tr>
               )}
             </tbody>
           </table>

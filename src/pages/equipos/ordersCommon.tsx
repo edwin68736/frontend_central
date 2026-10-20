@@ -82,3 +82,24 @@ export function AlertBadge({ alert, since, left }: { alert: string; since: numbe
 }
 
 export const SELECT = 'border border-slate-300 rounded-lg px-3 py-2 text-slate-800 text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500'
+
+// Un color por usuario, derivado de su id (sin guardarlo): estable entre sesiones y pantallas.
+const USER_STYLES = [
+  'bg-violet-50 text-violet-700 border-violet-200',
+  'bg-sky-50 text-sky-700 border-sky-200',
+  'bg-teal-50 text-teal-700 border-teal-200',
+  'bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200',
+  'bg-orange-50 text-orange-700 border-orange-200',
+  'bg-lime-50 text-lime-800 border-lime-200',
+  'bg-cyan-50 text-cyan-700 border-cyan-200',
+  'bg-pink-50 text-pink-700 border-pink-200',
+  'bg-yellow-50 text-yellow-800 border-yellow-200',
+  'bg-blue-50 text-blue-700 border-blue-200',
+]
+export const userBadgeStyle = (id: number) => USER_STYLES[Math.abs(id) % USER_STYLES.length]
+
+/** Quién registró el pedido; los antiguos sin usuario salen en gris. */
+export function UserBadge({ id, name }: { id: number | null | undefined; name?: string }) {
+  if (id == null) return <span className={`${PILL} bg-slate-100 text-slate-500 border-slate-200`}>Sin usuario</span>
+  return <span className={`${PILL} max-w-36 truncate ${userBadgeStyle(id)}`} title={name || `Usuario #${id}`}>{name || `Usuario #${id}`}</span>
+}

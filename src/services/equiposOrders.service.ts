@@ -174,6 +174,8 @@ export interface OrderView {
   customer_doc_number: string
   contact_dni: string
   contact_name: string
+  created_by: number | null
+  created_by_name: string
   customer_phone: string
   billing_doc_type: string
   total_amount: number
@@ -211,6 +213,8 @@ export interface OrderRow {
   guide_number: string
   department: string
   summary: string
+  created_by: number | null
+  created_by_name: string
 }
 
 export interface OrderListResult {
@@ -233,6 +237,7 @@ export interface OrderFilter {
   shipment_status?: string
   carrier_id?: number
   department?: string
+  created_by?: number | 'none'
   page?: number
   per_page?: number
 }
@@ -357,6 +362,7 @@ export const equiposOrders = {
   // `rows` puede llegar como null cuando no hay pedidos: se normaliza para que la tabla nunca lea null.length.
   listOrders: (f: OrderFilter) =>
     api.get<{ data: OrderListResult }>(`${base}/orders`, { params: f }).then((r) => ({ ...r.data.data, rows: r.data.data.rows ?? [] })),
+  listOrderUsers: () => api.get<{ data: { id: number; name: string }[] }>(`${base}/orders/users`).then((r) => r.data.data ?? []),
   getOrder: (id: number) => api.get<{ data: OrderView }>(`${base}/orders/${id}`).then((r) => r.data.data),
   createOrder: (body: OrderInput) => api.post<OrderResponse>(`${base}/orders`, body).then(unwrap),
   updateOrder: (id: number, body: OrderInput & { allow_negative?: boolean; negative_note?: string }, pin?: string) =>
