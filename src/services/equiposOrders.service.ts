@@ -363,6 +363,8 @@ export const equiposOrders = {
   listOrders: (f: OrderFilter) =>
     api.get<{ data: OrderListResult }>(`${base}/orders`, { params: f }).then((r) => ({ ...r.data.data, rows: r.data.data.rows ?? [] })),
   listOrderUsers: () => api.get<{ data: { id: number; name: string }[] }>(`${base}/orders/users`).then((r) => r.data.data ?? []),
+  listAssignableUsers: () => api.get<{ data: { id: number; name: string }[] }>(`${base}/orders/assignable-users`).then((r) => r.data.data ?? []),
+  assignOrderCreator: (id: number, userId: number) => api.patch<{ data: { created_by: number; created_by_name: string } }>(`${base}/orders/${id}/creator`, { user_id: userId }).then((r) => r.data.data),
   getOrder: (id: number) => api.get<{ data: OrderView }>(`${base}/orders/${id}`).then((r) => r.data.data),
   createOrder: (body: OrderInput) => api.post<OrderResponse>(`${base}/orders`, body).then(unwrap),
   updateOrder: (id: number, body: OrderInput & { allow_negative?: boolean; negative_note?: string }, pin?: string) =>

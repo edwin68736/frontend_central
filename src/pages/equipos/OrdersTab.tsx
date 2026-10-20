@@ -16,7 +16,8 @@ import OrderEditor from './OrderEditor'
 import { fmtDate, money, PaymentBadge, SELECT, ShipmentBadge, StatusBadge, UserBadge, ValidationBadge } from './ordersCommon'
 
 export default function OrdersTab() {
-  const { hasPermission } = useAuth()
+  const { hasPermission, user } = useAuth()
+  const isSuper = (user?.role ?? '').toLowerCase() === 'superadmin'
   const canCreate = hasPermission('equipos.create')
   const canSeeMoney = hasPermission('equipos.payments_view')
   const [filter, setFilter] = useState<OrderFilter>({})
@@ -28,6 +29,9 @@ export default function OrdersTab() {
   const dq = useDebounced(q, 450)
   const canShip = hasPermission('equipos.shipments')
   const [users, setUsers] = useState<{ id: number; name: string }[]>([])
+  const [assignable, setAssignable] = useState<{ id: number; name: string }[]>([])
+  const [usersTick, setUsersTick] = useState(0)
+  const [assigning, setAssigning] = useState<number | null>(null)
   const [data, setData] = useState<OrderListResult | null>(null)
   const [loading, setLoading] = useState(true)
   const [detailId, setDetailId] = useState<number | null>(null)
@@ -45,10 +49,28 @@ export default function OrdersTab() {
   }, [filter, dq, page, perPage])
 
   useEffect(() => { void load() }, [load])
-  useEffect(() => { equiposOrders.listOrderUsers().then(setUsers).catch(() => setUsers([])) }, [data?.total])
+  useEffect(() => { equiposOrders.listOrderUsers().then(setUsers).catch(() => setUsers([])) }, [data?.total, usersTick])
+  // Solo el superadmin puede asignar usuario a pedidos sin usuario (el servidor lo vuelve a exigir).
+  useEffect(() => { if (isSuper) equiposOrders.listAssignableUsers().then(setAssignable).catch(() => setAssignable([])) }, [isSuper])
+  const assign = async (orderId: number, userId: number) => {
+    setAssigning(orderId)
+    try {
+      const r = await equiposOrders.assignOrderCreator(orderId, userId)
+      toast.success(`Pedido asignado a ${r.created_by_name}`)
+      setUsersTick((n) => n + 1)
+      await load()
+    } catch (e) {
+      toast.error(apiError(e, 'No se pudo asignar el usuario'))
+      await load()
+    } finally {
+      setAssigning(null)
+    }
+  }
 
   const setF = (patch: Partial<OrderFilter>) => { setPage(1); setFilter((f) => ({ ...f, ...patch })) }
   const pages = data ? Math.max(1, Math.ceil(data.total / perPage)) : 1
+  // Si al asignar se vació la última página de una lista filtrada, vuelve a una página válida.
+  useEffect(() => { if (data && page > pages) setPage(pages) }, [data, page, pages])
   const pageIds = (data?.rows ?? []).filter((r) => r.status === 'registrado').map((r) => r.id)
   const allOnPage = pageIds.length > 0 && pageIds.every((id) => selected.has(id))
   const toggle = (id: number) => setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n })
@@ -125,7 +147,16 @@ export default function OrdersTab() {
                   <td className="px-3 text-slate-600 max-w-xs truncate" title={r.summary}>{r.summary}{r.is_gift && <span className="ml-1 text-xs text-emerald-700">(obsequio)</span>}</td>
                   {canSeeMoney && <td className="px-3 text-right whitespace-nowrap">{money(r.total_amount)}</td>}
                   {canSeeMoney && <td className={`px-3 text-right whitespace-nowrap ${r.balance_amount > 0 ? 'text-red-700 font-medium' : 'text-slate-400'}`}>{money(r.balance_amount)}</td>}
-                  <td className="px-3"><UserBadge id={r.created_by} name={r.created_by_name} /></td>
+                  <td className="px-3" onClick={(e) => e.stopPropagation()}>
+                    {isSuper && r.created_by == null ? (
+                      <select aria-label={`Asignar usuario al pedido ${r.order_number}`} value="" disabled={assigning === r.id || assignable.length === 0}
+                        onChange={(e) => e.target.value && void assign(r.id, Number(e.target.value))}
+                        className="rounded-full border border-dashed border-slate-300 bg-slate-50 px-2 py-0.5 text-xs text-slate-500 cursor-pointer max-w-36">
+                        <option value="">{assigning === r.id ? 'Asignando…' : 'Sin usuario · Asignar'}</option>
+                        {assignable.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                      </select>
+                    ) : <UserBadge id={r.created_by} name={r.created_by_name} />}
+                  </td>
                   <td className="px-3"><div className="flex flex-col gap-1 items-start"><StatusBadge value={r.status} />{r.status === 'registrado' && <ValidationBadge value={r.validation_status} />}</div></td>
                   <td className="px-3"><PaymentBadge value={r.payment_status} /></td>
                   <td className="px-3"><ShipmentBadge value={r.shipment_status} />{r.carrier_name && <span className="block text-xs text-slate-400">{r.carrier_name}{r.guide_number ? ` · ${r.guide_number}` : ''}</span>}</td>
