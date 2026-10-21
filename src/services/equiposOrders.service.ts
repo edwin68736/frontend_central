@@ -215,6 +215,8 @@ export interface OrderRow {
   summary: string
   created_by: number | null
   created_by_name: string
+  freight_cost: number
+  scheduled_dispatch_date: string | null
   destination_agency: string
   arrived_at: string | null
   days_in_agency: number | null
@@ -390,6 +392,8 @@ export const equiposOrders = {
   dispatch: (orderId: number, date?: string) => api.post<OrderResponse>(`${base}/orders/${orderId}/dispatch`, { date }).then(unwrap),
   arrived: (orderId: number, date?: string) => api.post<OrderResponse>(`${base}/orders/${orderId}/arrived`, { date }).then(unwrap),
   pickedUp: (orderId: number, date?: string) => api.post<OrderResponse>(`${base}/orders/${orderId}/picked-up`, { date }).then(unwrap),
+  updateShippingData: (orderId: number, body: { guide_number: string; freight_cost: number; scheduled_dispatch_date: string }) =>
+    api.patch<OrderResponse>(`${base}/orders/${orderId}/shipping-data`, body).then(unwrap),
   labelPrinted: (orderId: number) => api.post(`${base}/orders/${orderId}/label-printed`).then((r) => r.data),
 
   listPayments: (params: { customer_id?: number; from?: string; to?: string; method?: string; status?: string; q?: string; page?: number; per_page?: number }) =>

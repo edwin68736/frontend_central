@@ -1,18 +1,19 @@
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { Plus, Printer, Search } from 'lucide-react'
+import { Pencil, Plus, Printer, Search } from 'lucide-react'
 import PaginationBar from '@/components/ui/PaginationBar'
 import type { PerPageOption } from '@/services/pagination'
 import Spinner from '@/components/ui/Spinner'
 import { useAuth } from '@/contexts/AuthContext'
 import {
-  equiposOrders, ORDER_STATUS_LABEL, PAYMENT_STATUS_LABEL, SHIPMENT_STATUS_LABEL, VALIDATION_LABEL, type OrderFilter, type OrderListResult,
+  equiposOrders, ORDER_STATUS_LABEL, PAYMENT_STATUS_LABEL, SHIPMENT_STATUS_LABEL, VALIDATION_LABEL, type OrderFilter, type OrderListResult, type OrderRow,
 } from '@/services/equiposOrders.service'
 import { apiError, BTN_PRIMARY, INPUT } from './common'
 import OrderDetail from './OrderDetail'
 import { useDebounced } from './hooks'
 import { printLabelsFor } from './printLabels'
 import OrderEditor from './OrderEditor'
+import ShippingDataModal from './ShippingDataModal'
 import { fmtDate, money, PaymentBadge, SELECT, ShipmentBadge, StatusBadge, UserBadge, ValidationBadge } from './ordersCommon'
 
 export default function OrdersTab() {
@@ -36,6 +37,7 @@ export default function OrdersTab() {
   const [loading, setLoading] = useState(true)
   const [detailId, setDetailId] = useState<number | null>(null)
   const [editor, setEditor] = useState<{ open: boolean; id?: number }>({ open: false })
+  const [shipEdit, setShipEdit] = useState<OrderRow | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -134,7 +136,7 @@ export default function OrdersTab() {
               <tr className="text-left text-xs text-slate-500 border-b border-slate-200 bg-slate-50">
                 {canShip && <th className="px-3 py-2 w-8"><input type="checkbox" aria-label="Seleccionar la página" checked={allOnPage} onChange={togglePage} className="rounded" /></th>}<th className="px-3 py-2">N°</th><th className="px-3">Fecha</th><th className="px-3">Cliente</th><th className="px-3">Detalle</th>
                 {canSeeMoney && <th className="px-3 text-right">Total</th>}{canSeeMoney && <th className="px-3 text-right">Saldo</th>}
-                <th className="px-3">Usuario</th><th className="px-3">Estado</th><th className="px-3">Pago</th><th className="px-3">Envío</th>
+                <th className="px-3">Agencia</th><th className="px-3">Usuario</th><th className="px-3">Estado</th><th className="px-3">Pago</th><th className="px-3">Envío</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -148,6 +150,26 @@ export default function OrdersTab() {
                   {canSeeMoney && <td className="px-3 text-right whitespace-nowrap">{money(r.total_amount)}</td>}
                   {canSeeMoney && <td className={`px-3 text-right whitespace-nowrap ${r.balance_amount > 0 ? 'text-red-700 font-medium' : 'text-slate-400'}`}>{money(r.balance_amount)}</td>}
                   <td className="px-3" onClick={(e) => e.stopPropagation()}>
+                    {(() => {
+                      const place = r.destination_agency || r.carrier_name
+                      const text = (
+                        <>
+                          <span className="text-slate-800">{place || <span className="text-slate-300">Sin agencia</span>}</span>
+                          {r.destination_agency && r.carrier_name && <span className="block text-xs text-slate-400">{r.carrier_name}</span>}
+                          <span className="block text-xs text-slate-500">{r.guide_number ? `Guía ${r.guide_number}` : 'Sin guía'}</span>
+                        </>
+                      )
+                      const reason = r.status === 'anulado' ? 'Pedido anulado' : r.shipment_status === 'entregado' ? 'Envío entregado' : r.shipment_status === 'retorno' ? 'Envío en retorno' : ''
+                      if (!canShip) return <div>{text}</div>
+                      if (reason) return <div title={reason}>{text}<span className="block text-[11px] text-slate-400">{reason}: solo lectura</span></div>
+                      return (
+                        <button type="button" onClick={() => setShipEdit(r)} title="Editar guía, flete y despacho" aria-label={`Editar datos de envío del pedido ${r.order_number}`} className="group flex items-start gap-1.5 text-left rounded-lg px-1.5 py-1 -mx-1.5 hover:bg-slate-100">
+                          <span>{text}</span><Pencil size={13} className="mt-0.5 shrink-0 text-slate-400 group-hover:text-indigo-600" />
+                        </button>
+                      )
+                    })()}
+                  </td>
+                  <td className="px-3" onClick={(e) => e.stopPropagation()}>
                     {isSuper && r.created_by == null ? (
                       <select aria-label={`Asignar usuario al pedido ${r.order_number}`} value="" disabled={assigning === r.id || assignable.length === 0}
                         onChange={(e) => e.target.value && void assign(r.id, Number(e.target.value))}
@@ -159,11 +181,11 @@ export default function OrdersTab() {
                   </td>
                   <td className="px-3"><div className="flex flex-col gap-1 items-start"><StatusBadge value={r.status} />{r.status === 'registrado' && <ValidationBadge value={r.validation_status} />}</div></td>
                   <td className="px-3"><PaymentBadge value={r.payment_status} /></td>
-                  <td className="px-3"><ShipmentBadge value={r.shipment_status} />{r.carrier_name && <span className="block text-xs text-slate-400">{r.carrier_name}{r.guide_number ? ` · ${r.guide_number}` : ''}</span>}</td>
+                  <td className="px-3"><ShipmentBadge value={r.shipment_status} /></td>
                 </tr>
               ))}
               {data && data.rows.length === 0 && (
-                <tr><td colSpan={11} className="text-center text-slate-400 py-12">No hay pedidos con esos filtros.</td></tr>
+                <tr><td colSpan={11 + 1} className="text-center text-slate-400 py-12">No hay pedidos con esos filtros.</td></tr>
               )}
             </tbody>
           </table>
@@ -172,6 +194,7 @@ export default function OrdersTab() {
 
       {data && <PaginationBar page={page} perPage={perPage} total={data.total} totalPages={pages} onPageChange={setPage} onPerPageChange={(n) => { setPerPage(n); setPage(1) }} itemLabel="pedidos" />}
 
+      <ShippingDataModal order={shipEdit} onClose={() => setShipEdit(null)} onSaved={() => void load()} />
       <OrderDetail
         orderId={detailId} onClose={() => setDetailId(null)} onChanged={() => void load()}
         onEdit={(id) => { setDetailId(null); setEditor({ open: true, id }) }}
