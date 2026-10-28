@@ -8,7 +8,7 @@ import {
   equiposService, type EquipAgency, type EquipCarrier, type EquipCombo, type EquipProduct,
 } from '@/services/equipos.service'
 import {
-  DELIVERY_MODE_LABEL, equiposOrders, negativeStockItems, type DeliveryMode, type EquipCustomerRow, type LineType,
+  equiposOrders, negativeStockItems, type DeliveryMode, type EquipCustomerRow, type LineType,
   type NegativeStockItem, type OrderInput, type OrderItemInput, type OrderView, type SaleType,
 } from '@/services/equiposOrders.service'
 import { apiError, BTN_PRIMARY, BTN_SECONDARY, INPUT, LABEL } from './common'
@@ -152,6 +152,24 @@ export default function OrderEditor({ open, onClose, orderId, onSaved }: Props) 
     setShip({
       destination_agency_id: a.id, destination_agency: a.address ? `${a.name} - ${a.address}` : a.name,
       ...(a.department ? { destination_department: a.department, destination_province: a.province, destination_district: a.district } : {}),
+    })
+  }
+  // 'pendiente_recojo' es el valor antiguo de "recojo en oficina": se muestra como oficina y se conserva si no se cambia.
+  const isAgency = (form.shipment?.delivery_mode ?? 'agencia') === 'agencia'
+  const changeMode = (mode: 'agencia' | 'oficina') => {
+    setManualAgency(false)
+    if (mode === 'agencia') {
+      const def = carriers.find((x) => x.is_default) ?? carriers[0]
+      const cid = form.shipment?.carrier_id ?? def?.id ?? null
+      const c = carriers.find((x) => x.id === cid)
+      setShip({ delivery_mode: 'agencia', carrier_id: cid, origin_agency_id: c?.default_origin_agency_id ?? null })
+      return
+    }
+    // Sin transportista no hay guía, flete, agencias ni destino: se limpian para no guardar datos que ya no se ven.
+    setShip({
+      delivery_mode: form.shipment?.delivery_mode === 'pendiente_recojo' ? 'pendiente_recojo' : 'oficina',
+      carrier_id: null, guide_number: '', freight_cost: null, origin_agency_id: null, destination_agency_id: null, destination_agency: '',
+      destination_department: '', destination_province: '', destination_district: '',
     })
   }
   const changeCarrier = (id: number | null) => {
@@ -508,17 +526,20 @@ export default function OrderEditor({ open, onClose, orderId, onSaved }: Props) 
             <h3 className="text-sm font-semibold text-slate-800">Envío</h3>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
               <div>
-                <label className={LABEL}>Transportista</label>
-                <SearchSelect value={form.shipment?.carrier_id} placeholder="Sin definir" searchPlaceholder="Buscar transportista…" clearable
-                  options={carriers.map((c) => ({ value: c.id, label: c.name }))} onChange={(v) => changeCarrier(v ? Number(v) : null)} />
-              </div>
-              <div>
-                <label className={LABEL}>Modalidad</label>
-                <select value={form.shipment?.delivery_mode ?? 'agencia'} onChange={(e) => setShip({ delivery_mode: e.target.value as DeliveryMode })} className={INPUT}>
-                  {Object.entries(DELIVERY_MODE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                <label className={LABEL}>Modalidad de entrega</label>
+                <select value={isAgency ? 'agencia' : 'oficina'} onChange={(e) => changeMode(e.target.value === 'agencia' ? 'agencia' : 'oficina')} className={INPUT}>
+                  <option value="agencia">Envío por agencia</option>
+                  <option value="oficina">Recojo en oficina</option>
                 </select>
               </div>
-              {hasAgencies && !manualAgency ? (
+              {isAgency && (
+                <div>
+                  <label className={LABEL}>Transportista</label>
+                  <SearchSelect value={form.shipment?.carrier_id} placeholder="Sin definir" searchPlaceholder="Buscar transportista…" clearable
+                    options={carriers.map((c) => ({ value: c.id, label: c.name }))} onChange={(v) => changeCarrier(v ? Number(v) : null)} />
+                </div>
+              )}
+              {!isAgency ? null : hasAgencies && !manualAgency ? (
                 <>
                   <div>
                     <label className={LABEL}>Departamento</label>
@@ -570,9 +591,13 @@ export default function OrderEditor({ open, onClose, orderId, onSaved }: Props) 
                   </div>
                 </>
               )}
-              <div><label className={LABEL}>{carrier?.guide_label || 'N° de guía'} (opcional ahora)</label><input value={form.shipment?.guide_number ?? ''} onChange={(e) => setShip({ guide_number: e.target.value.trim() })} className={INPUT} /></div>
-              <div><label className={LABEL}>Costo del flete (opcional)</label><input type="number" min={0} step="0.01" value={form.shipment?.freight_cost ?? ''} onChange={(e) => setShip({ freight_cost: e.target.value === '' ? null : Number(e.target.value) })} className={INPUT} /></div>
-              <div><label className={LABEL}>Despacho programado</label><input type="date" value={form.shipment?.scheduled_dispatch_date ?? ''} onChange={(e) => setShip({ scheduled_dispatch_date: e.target.value })} className={INPUT} /></div>
+              {isAgency && (
+                <>
+                  <div><label className={LABEL}>{carrier?.guide_label || 'N° de guía'} (opcional ahora)</label><input value={form.shipment?.guide_number ?? ''} onChange={(e) => setShip({ guide_number: e.target.value.trim() })} className={INPUT} /></div>
+                  <div><label className={LABEL}>Costo del flete (opcional)</label><input type="number" min={0} step="0.01" value={form.shipment?.freight_cost ?? ''} onChange={(e) => setShip({ freight_cost: e.target.value === '' ? null : Number(e.target.value) })} className={INPUT} /></div>
+                </>
+              )}
+              <div><label className={LABEL}>{isAgency ? 'Despacho programado' : 'Fecha prevista de recojo'}</label><input type="date" value={form.shipment?.scheduled_dispatch_date ?? ''} onChange={(e) => setShip({ scheduled_dispatch_date: e.target.value })} className={INPUT} /></div>
             </div>
             {carrier && form.shipment?.scheduled_dispatch_date && carrier.dispatch_days && (() => {
               const dow = new Date(`${form.shipment!.scheduled_dispatch_date}T12:00:00`).getDay()

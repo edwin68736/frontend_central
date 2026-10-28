@@ -19,7 +19,7 @@ export const ORDER_STATUS_LABEL: Record<string, string> = { borrador: 'Borrador'
 export const SHIPMENT_STATUS_LABEL: Record<string, string> = {
   pendiente_envio: 'Por despachar', en_transito: 'En tránsito', en_agencia: 'En agencia', entregado: 'Recogido', retorno: 'En retorno',
 }
-export const DELIVERY_MODE_LABEL: Record<string, string> = { agencia: 'Agencia', oficina: 'Oficina', pendiente_recojo: 'Recojo en oficina' }
+export const DELIVERY_MODE_LABEL: Record<string, string> = { agencia: 'Agencia', oficina: 'Recojo en oficina', pendiente_recojo: 'Recojo en oficina' }
 
 export interface EquipCustomerRow {
   id: number
