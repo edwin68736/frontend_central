@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { Pencil, Plus, Search, Trash2 } from 'lucide-react'
+import { Download, Pencil, Plus, Search, Trash2, Upload } from 'lucide-react'
+import CatalogImportModal, { downloadCatalogTemplate } from './CatalogImportModal'
 import Modal from '@/components/ui/Modal'
 import Spinner from '@/components/ui/Spinner'
 import PaginationBar from '@/components/ui/PaginationBar'
@@ -38,6 +39,7 @@ export default function CatalogTab() {
   const [pForm, setPForm] = useState<{ open: boolean; id?: number; data: EquipProductInput }>({ open: false, data: EMPTY_PRODUCT })
   const [cForm, setCForm] = useState<{ open: boolean; data: ComboForm }>({ open: false, data: EMPTY_COMBO })
   const [saving, setSaving] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
   const confirm = useConfirm()
   const dq = useDebounced(q, 450)
 
@@ -152,7 +154,11 @@ export default function CatalogTab() {
       <section>
         <div className="flex items-center justify-between mb-2">
           <h2 className="text-lg font-semibold text-slate-800">Productos <span className="text-sm font-normal text-slate-400">({shownProducts.length})</span></h2>
-          {canEdit && <button type="button" className={BTN_PRIMARY} onClick={() => openProduct()}><Plus size={16} /> Nuevo producto</button>}
+          <div className="flex gap-2">
+            <button type="button" className={BTN_SECONDARY} onClick={() => void downloadCatalogTemplate().catch((e) => toast.error(apiError(e, 'No se pudo generar la plantilla')))}><Download size={14} /> Descargar plantilla</button>
+            {canEdit && <button type="button" className={BTN_SECONDARY} onClick={() => setImportOpen(true)}><Upload size={14} /> Importar Excel</button>}
+            {canEdit && <button type="button" className={BTN_PRIMARY} onClick={() => openProduct()}><Plus size={16} /> Nuevo producto</button>}
+          </div>
         </div>
         <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
           <table className="w-full text-sm">
@@ -219,7 +225,9 @@ export default function CatalogTab() {
         {shownCombos.length > 0 && <PaginationBar {...comboP.barProps} itemLabel="combos" />}
       </section>
 
-      <Modal open={pForm.open} onClose={() => setPForm((f) => ({ ...f, open: false }))} title={pForm.id ? 'Editar producto' : 'Nuevo producto'}>
+      {canEdit && <CatalogImportModal open={importOpen} onClose={() => setImportOpen(false)} onDone={() => void load()} />}
+
+      <Modal open={pForm.open}onClose={() => setPForm((f) => ({ ...f, open: false }))} title={pForm.id ? 'Editar producto' : 'Nuevo producto'}>
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <div><label className={LABEL}>Código *</label><input value={pForm.data.code} onChange={(e) => setPForm((f) => ({ ...f, data: { ...f.data, code: e.target.value } }))} className={INPUT} /></div>

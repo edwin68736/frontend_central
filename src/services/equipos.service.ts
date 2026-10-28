@@ -264,6 +264,36 @@ export interface ImportPayload {
   sheets: Record<'catalogo' | 'combos' | 'detalle' | 'envios' | 'retornos' | 'stock', unknown[][]>
 }
 
+export interface CatalogImportRow {
+  row: number
+  code: string
+  name: string
+  kind: string
+  reference_price: string
+  yellow_threshold: string
+  green_threshold: string
+  active: string
+  notes: string
+}
+
+export interface CatalogImportItem {
+  row: number
+  code: string
+  name: string
+  action: 'crear' | 'actualizar' | 'sin_cambios' | 'error'
+  error?: string
+}
+
+export interface CatalogImportResult {
+  total: number
+  created: number
+  updated: number
+  unchanged: number
+  errors: number
+  committed: boolean
+  items: CatalogImportItem[]
+}
+
 const base = '/superadmin/equipos'
 
 export const equiposService = {
@@ -275,6 +305,9 @@ export const equiposService = {
       .then((r) => ({ products: r.data.data ?? [], stockVisible: r.data.stock_visible })),
   createProduct: (body: EquipProductInput) => api.post(`${base}/products`, body).then((r) => r.data.data as EquipProduct),
   updateProduct: (id: number, body: EquipProductInput) => api.put(`${base}/products/${id}`, body).then((r) => r.data.data as EquipProduct),
+
+  importCatalog: (rows: CatalogImportRow[], commit: boolean) =>
+    api.post<{ data: CatalogImportResult }>(`${base}/products/import`, { rows, commit }).then((r) => r.data.data),
 
   listCombos: (includeInactive = false) =>
     api.get<{ data: EquipCombo[] }>(`${base}/combos`, { params: { include_inactive: includeInactive ? 1 : undefined } }).then((r) => r.data.data ?? []),
