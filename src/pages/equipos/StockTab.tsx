@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { History, PackagePlus, SlidersHorizontal, PackageMinus, Search } from 'lucide-react'
+import { Download, History, PackagePlus, SlidersHorizontal, PackageMinus, Search } from 'lucide-react'
+import { writeXlsx } from 'hucre'
+import { downloadXlsxBytes } from '@/utils/downloadXlsx'
 import Modal from '@/components/ui/Modal'
 import Spinner from '@/components/ui/Spinner'
 import { useAuth } from '@/contexts/AuthContext'
@@ -100,6 +102,26 @@ export default function StockTab() {
   )
   const lowCount = rows.filter((r) => r.semaphore === 'bajo').length
 
+  const exportXlsx = async () => {
+    if (rows.length === 0) return toast.error('No hay stock para exportar')
+    const header = [
+      'Código', 'Producto', 'Tipo', 'Stock inicial', 'Ingresos', 'Salidas directas indep.', 'Salidas directas promo TK',
+      'Salidas combos indep.', 'Salidas combos promo TK', 'Total salidas', 'Reingresos', 'Ajustes', 'Stock actual',
+      'Umbral amarillo', 'Umbral verde', 'Semáforo',
+    ]
+    const body = rows.map((r) => [
+      r.code, r.name, EQUIP_KIND_LABEL[r.kind], r.opening, r.ingresos, r.direct_independiente, r.direct_promo_tk,
+      r.combo_independiente, r.combo_promo_tk, r.total_out, r.reingresos, r.adjustments, r.current,
+      r.yellow_threshold, r.green_threshold, r.semaphore,
+    ])
+    try {
+      const bytes = await writeXlsx({ sheets: [{ name: `Stock ${period}`, rows: [header, ...body] }] })
+      downloadXlsxBytes(bytes, `stock-equipos-${period}.xlsx`)
+    } catch (e) {
+      toast.error(apiError(e, 'No se pudo generar el Excel'))
+    }
+  }
+
   const openKardex = async (r: EquipStockRow) => {
     setKardex(r)
     setMoves([])
@@ -179,6 +201,9 @@ export default function StockTab() {
           <input type="checkbox" checked={onlyLow} onChange={(e) => setOnlyLow(e.target.checked)} className="rounded" />
           Solo stock bajo{lowCount > 0 && <span className="text-red-600 font-medium">({lowCount})</span>}
         </label>
+        <button type="button" className={BTN_SECONDARY + (canAdjust ? '' : ' ml-auto')} onClick={() => void exportXlsx()} disabled={loading || rows.length === 0} title="Descarga todo el stock del mes seleccionado, sin filtros">
+          <Download size={14} /> Excel
+        </button>
         {canAdjust && (
           <div className="flex gap-2 ml-auto">
             <button type="button" className={BTN_PRIMARY} onClick={() => openForm('ingreso')}><PackagePlus size={16} /> Ingreso</button>
