@@ -4,7 +4,7 @@ import { buildLabelSheet, openLabel } from './shippingLabel'
 
 export const MAX_LABELS = 60
 
-/** Imprime en un solo PDF A4 los rótulos de los pedidos elegidos (6 por hoja, con salto de página). */
+/** Imprime en un solo PDF A4 los rótulos de los pedidos elegidos, de menor a mayor número de pedido y con salto de página. */
 export async function printLabelsFor(orderIds: number[]): Promise<boolean> {
   if (orderIds.length === 0) {
     toast.error('Selecciona al menos un pedido')
