@@ -145,6 +145,10 @@ export interface ShipmentView {
   pickup_deadline: string | null
   picked_up_at: string | null
   label_printed_at: string | null
+  provider_ose_id?: string
+  provider_code?: string
+  provider_status?: string
+  provider_synced_at?: string | null
   freight_cost: number
   status: string
   notes: string

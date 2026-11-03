@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { AlertTriangle, Ban, Banknote, CheckCircle2, ExternalLink, MessageCircle, Pencil, Printer, RotateCcw, Truck } from 'lucide-react'
+import { AlertTriangle, Ban, Banknote, CheckCircle2, ExternalLink, MessageCircle, Pencil, Printer, RefreshCw, RotateCcw, Truck } from 'lucide-react'
 import Modal from '@/components/ui/Modal'
 import Spinner from '@/components/ui/Spinner'
 import { useAuth } from '@/contexts/AuthContext'
@@ -9,6 +9,7 @@ import {
 } from '@/services/equiposOrders.service'
 import { apiError, BTN_PRIMARY, BTN_SECONDARY, formatDateTime, INPUT } from './common'
 import { fmtDate, money, PaymentBadge, ShipmentBadge, StatusBadge, UserBadge, ValidationBadge } from './ordersCommon'
+import { equiposProvider } from '@/services/equiposProvider.service'
 import { buildShippingLabel, openLabel } from './shippingLabel'
 import { useConfirm, type ConfirmOptions, type ConfirmResult } from './ConfirmProvider'
 import PaymentModal from './PaymentModal'
@@ -57,6 +58,7 @@ export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Pro
   const confirm = useConfirm()
   const [retOpen, setRetOpen] = useState(false)
   const [dateAction, setDateAction] = useState<DateAction | null>(null)
+  const [linkCode, setLinkCode] = useState('')
 
   const can = (p: string) => hasPermission(p)
 
@@ -160,6 +162,33 @@ export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Pro
                       {sh.pickup_deadline ? ` · Vence ${fmtDate(sh.pickup_deadline)}` : ''}{sh.picked_up_at ? ` · Recogido ${fmtDate(sh.picked_up_at)}` : ''}
                     </p>
                     {sh.dispatch_day_notice && <p className="text-xs text-amber-700">{sh.dispatch_day_notice}</p>}
+                    {sh.carrier_code === 'shalom' && o.status === 'registrado' && (
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+                        {sh.provider_code ? (
+                          <>
+                            <span className="text-slate-500">
+                              Código Shalom <b className="font-mono">{sh.provider_code}</b>
+                              {sh.provider_status ? <> · Shalom: <b>{sh.provider_status}</b></> : null}
+                              {sh.provider_synced_at ? ` · ${formatDateTime(sh.provider_synced_at)}` : ''}
+                            </span>
+                            {can('equipos.shipments') && (
+                              <button type="button" className={BTN_SECONDARY + ' !py-1 !text-xs'} disabled={busy}
+                                onClick={() => void act(() => equiposProvider.refreshTracking(o.id), 'Estado actualizado desde Shalom')}>
+                                <RefreshCw size={12} /> Actualizar desde Shalom
+                              </button>
+                            )}
+                          </>
+                        ) : can('equipos.shipments') && sh.guide_number ? (
+                          <>
+                            <input value={linkCode} onChange={(e) => setLinkCode(e.target.value.toUpperCase().slice(0, 4))} placeholder="Código (4)" maxLength={4} aria-label="Código de Shalom" className={INPUT + ' !w-24 !py-1 font-mono'} />
+                            <button type="button" className={BTN_SECONDARY + ' !py-1 !text-xs'} disabled={busy || linkCode.length !== 4}
+                              onClick={() => void act(() => equiposProvider.linkTracking(o.id, linkCode), 'Seguimiento de Shalom vinculado')}>
+                              Vincular seguimiento
+                            </button>
+                          </>
+                        ) : null}
+                      </div>
+                    )}
                   </>
                 ) : <p className="text-slate-400">Sin envío</p>}
               </section>

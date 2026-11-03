@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { MapPin, Pencil, Plus, Truck } from 'lucide-react'
+import { MapPin, Pencil, Plug, Plus, Truck } from 'lucide-react'
 import Modal from '@/components/ui/Modal'
 import Spinner from '@/components/ui/Spinner'
 import { useAuth } from '@/contexts/AuthContext'
 import { equiposService, type EquipCarrier, type EquipCarrierInput } from '@/services/equipos.service'
 import { useConfirm } from './ConfirmProvider'
 import AgenciesModal from './AgenciesModal'
+import ShalomIntegrationModal from './ShalomIntegrationModal'
 import { ActiveBadge, apiError, BTN_PRIMARY, BTN_SECONDARY, DAYS, formatDays, INPUT, LABEL } from './common'
 
 const EMPTY: EquipCarrierInput = {
@@ -23,6 +24,7 @@ export default function CarriersTab() {
   const [saving, setSaving] = useState(false)
   const confirm = useConfirm()
   const [agenciesOf, setAgenciesOf] = useState<number | null>(null)
+  const [shalomOpen, setShalomOpen] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -108,6 +110,7 @@ export default function CarriersTab() {
             </dl>
             <div className="mt-3 flex items-center justify-between gap-2">
               <button type="button" className={BTN_SECONDARY} onClick={() => setAgenciesOf(c.id)}><MapPin size={12} /> Agencias{c.agency_count ? ` (${c.agency_count})` : ''}</button>
+              {c.code === 'shalom' && <button type="button" className={BTN_SECONDARY} onClick={() => setShalomOpen(true)}><Plug size={12} /> Integración</button>}
               {canEdit && <button type="button" className={BTN_SECONDARY} onClick={() => open(c)}><Pencil size={12} /> Editar</button>}
             </div>
           </div>
@@ -116,6 +119,7 @@ export default function CarriersTab() {
       </div>
 
       <AgenciesModal carrier={rows.find((c) => c.id === agenciesOf) ?? null} onClose={() => setAgenciesOf(null)} onChanged={() => void load()} />
+      <ShalomIntegrationModal open={shalomOpen} onClose={() => setShalomOpen(false)} onChanged={() => void load()} />
 
       <Modal open={form.open} onClose={() => setForm((f) => ({ ...f, open: false }))} title={form.id ? 'Editar transportista' : 'Nuevo transportista'}>
         <div className="space-y-3">
