@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import CollectionAlertsBell from '@/components/CollectionAlertsBell'
+import EquiposNotificationsBell from '@/components/EquiposNotificationsBell'
 import {
   LayoutDashboard,
   Building2,
@@ -137,6 +138,7 @@ export default function MainLayout() {
             <Menu size={22} />
           </button>
           <div className="flex-1" />
+          {hasPermission('equipos.view') && <EquiposNotificationsBell />}
           <CollectionAlertsBell />
 
           {/* Cuenta: vive en el header, no al pie del sidebar, para que quede al alcance

@@ -46,6 +46,28 @@ export interface TariffQuote {
   from_cache: boolean
 }
 
+export interface PanelNotification {
+  id: number
+  kind: string
+  severity: string
+  title: string
+  message: string
+  order_id: number
+  order_number: number
+  read_at: string | null
+  created_at: string
+}
+
+export interface ShipmentEvent {
+  id: number
+  source: 'webhook' | 'consulta'
+  type: string
+  status: string
+  at: string
+  note: string
+  timeline: { milestone: string; fecha: string; completo: boolean }[]
+}
+
 interface OrderResponse { data: OrderView; warnings?: string[] }
 const unwrap = (r: { data: OrderResponse }) => ({ order: r.data.data, warnings: r.data.warnings ?? [] })
 
@@ -65,5 +87,8 @@ export const equiposProvider = {
   linkTracking: (orderId: number, code: string) => api.post<OrderResponse>(`${base}/orders/${orderId}/provider/link`, { code }, { timeout: 180_000 }).then(unwrap),
   quoteTariff: (orderId: number, aereo = false) =>
     api.post<{ data: TariffQuote }>(`${base}/orders/${orderId}/provider/tariff`, { aereo }, { timeout: 180_000 }).then((r) => r.data.data),
+  events: (orderId: number) => api.get<{ data: ShipmentEvent[] }>(`${base}/orders/${orderId}/provider/events`).then((r) => r.data.data ?? []),
+  notifications: () => api.get<{ data: PanelNotification[]; unread: number }>(`${base}/notifications`).then((r) => ({ items: r.data.data ?? [], unread: r.data.unread ?? 0 })),
+  markNotificationsRead: (body: { ids?: number[]; all?: boolean }) => api.post(`${base}/notifications/read`, body).then(() => undefined),
   refreshTracking: (orderId: number) => api.post<OrderResponse>(`${base}/orders/${orderId}/provider/refresh`, {}, { timeout: 180_000 }).then(unwrap),
 }

@@ -1,3 +1,4 @@
+import { useSearchParams } from 'react-router-dom'
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { Pencil, Plus, Printer, Search } from 'lucide-react'
@@ -36,6 +37,17 @@ export default function OrdersTab() {
   const [data, setData] = useState<OrderListResult | null>(null)
   const [loading, setLoading] = useState(true)
   const [detailId, setDetailId] = useState<number | null>(null)
+  // Enlace desde la campana de envíos: /equipos?tab=pedidos&order=ID abre el detalle de ese pedido.
+  const [params, setParams] = useSearchParams()
+  useEffect(() => {
+    const id = Number(params.get('order'))
+    if (id > 0) {
+      setDetailId(id)
+      const next = new URLSearchParams(params)
+      next.delete('order')
+      setParams(next, { replace: true })
+    }
+  }, [params, setParams])
   const [editor, setEditor] = useState<{ open: boolean; id?: number }>({ open: false })
   const [shipEdit, setShipEdit] = useState<OrderRow | null>(null)
 

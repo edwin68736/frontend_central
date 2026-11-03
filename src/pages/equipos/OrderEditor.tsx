@@ -14,6 +14,7 @@ import {
 import { apiError, BTN_PRIMARY, BTN_SECONDARY, INPUT, LABEL } from './common'
 import { money, toDateInput, todayISO } from './ordersCommon'
 import { useDebounced } from './hooks'
+import ShalomLocationSelects from './ShalomLocationSelects'
 import { useConfirm } from './ConfirmProvider'
 
 const DEPARTMENTS = ['Amazonas', 'Áncash', 'Apurímac', 'Arequipa', 'Ayacucho', 'Cajamarca', 'Callao', 'Cusco', 'Huancavelica', 'Huánuco', 'Ica', 'Junín', 'La Libertad', 'Lambayeque', 'Lima', 'Loreto', 'Madre de Dios', 'Moquegua', 'Pasco', 'Piura', 'Puno', 'San Martín', 'Tacna', 'Tumbes', 'Ucayali']
@@ -154,6 +155,18 @@ export default function OrderEditor({ open, onClose, orderId, onSaved }: Props) 
       ...(a.department ? { destination_department: a.department, destination_province: a.province, destination_district: a.district } : {}),
     })
   }
+  // Campos de texto del destino (agencia escrita a mano). Con Shalom activo se reemplazan por los selectores de ubicación.
+  const manualPlaceFields = (
+    <>
+                    <div>
+                      <label className={LABEL}>Departamento</label>
+                      <input list="equip-deps" value={form.shipment?.destination_department ?? ''} onChange={(e) => setShip({ destination_department: e.target.value })} className={INPUT} />
+                      <datalist id="equip-deps">{DEPARTMENTS.map((d) => <option key={d} value={d} />)}</datalist>
+                    </div>
+                    <div><label className={LABEL}>Provincia</label><input value={form.shipment?.destination_province ?? ''} onChange={(e) => setShip({ destination_province: e.target.value })} className={INPUT} /></div>
+                    <div><label className={LABEL}>Distrito</label><input value={form.shipment?.destination_district ?? ''} onChange={(e) => setShip({ destination_district: e.target.value })} className={INPUT} /></div>
+    </>
+  )
   // 'pendiente_recojo' es el valor antiguo de "recojo en oficina": se muestra como oficina y se conserva si no se cambia.
   const isAgency = (form.shipment?.delivery_mode ?? 'agencia') === 'agencia'
   const changeMode = (mode: 'agencia' | 'oficina') => {
@@ -577,13 +590,13 @@ export default function OrderEditor({ open, onClose, orderId, onSaved }: Props) 
                 </>
               ) : (
                 <>
-                  <div>
-                    <label className={LABEL}>Departamento</label>
-                    <input list="equip-deps" value={form.shipment?.destination_department ?? ''} onChange={(e) => setShip({ destination_department: e.target.value })} className={INPUT} />
-                    <datalist id="equip-deps">{DEPARTMENTS.map((d) => <option key={d} value={d} />)}</datalist>
-                  </div>
-                  <div><label className={LABEL}>Provincia</label><input value={form.shipment?.destination_province ?? ''} onChange={(e) => setShip({ destination_province: e.target.value })} className={INPUT} /></div>
-                  <div><label className={LABEL}>Distrito</label><input value={form.shipment?.destination_district ?? ''} onChange={(e) => setShip({ destination_district: e.target.value })} className={INPUT} /></div>
+                  {carrier?.code === 'shalom' ? (
+                    <ShalomLocationSelects
+                      value={{ department: selDep, province: selProv, district: selDist }} canonicalDepartments={DEPARTMENTS}
+                      onChange={(v) => setShip({ destination_department: v.department, destination_province: v.province, destination_district: v.district })}
+                      fallback={manualPlaceFields}
+                    />
+                  ) : manualPlaceFields}
                   <div>
                     <label className={LABEL}>Agencia / dirección de destino</label>
                     <input value={form.shipment?.destination_agency ?? ''} onChange={(e) => setShip({ destination_agency: e.target.value })} className={INPUT} />

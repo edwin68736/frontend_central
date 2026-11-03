@@ -9,7 +9,7 @@ import {
 } from '@/services/equiposOrders.service'
 import { apiError, BTN_PRIMARY, BTN_SECONDARY, formatDateTime, INPUT } from './common'
 import { fmtDate, money, PaymentBadge, ShipmentBadge, StatusBadge, UserBadge, ValidationBadge } from './ordersCommon'
-import { equiposProvider, type TariffQuote } from '@/services/equiposProvider.service'
+import { equiposProvider, type ShipmentEvent, type TariffQuote } from '@/services/equiposProvider.service'
 import { buildShippingLabel, openLabel } from './shippingLabel'
 import { useConfirm, type ConfirmOptions, type ConfirmResult } from './ConfirmProvider'
 import PaymentModal from './PaymentModal'
@@ -22,6 +22,12 @@ interface Props {
   onClose: () => void
   onChanged: () => void
   onEdit: (id: number) => void
+}
+
+/** Hitos del seguimiento de Shalom, con el nombre que ve el operador. */
+const MILESTONE_LABEL: Record<string, string> = {
+  registrado: 'Registrada en Shalom', origen: 'Recibida en agencia de origen', transito: 'En tránsito', demora: 'Con demora',
+  destino: 'Llegó a la agencia de destino', reparto: 'En reparto', entregado: 'Entregada',
 }
 
 /** La guía de Shalom se registra como «NÚMERO - CÓDIGO» (ej. «100439617 - M7JK»): devuelve el código si ya viene en ella. */
@@ -70,6 +76,8 @@ export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Pro
   const [linkCode, setLinkCode] = useState('')
   const [quote, setQuote] = useState<TariffQuote | null>(null)
   const [quoting, setQuoting] = useState(false)
+  const [events, setEvents] = useState<ShipmentEvent[] | null>(null)
+  const [eventsOpen, setEventsOpen] = useState(false)
 
   const can = (p: string) => hasPermission(p)
 
@@ -119,6 +127,21 @@ export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Pro
   }
 
   const sh = o?.shipment ?? null
+
+  // Al cambiar de pedido se limpia lo cargado del anterior.
+  useEffect(() => { setEvents(null); setEventsOpen(false); setQuote(null) }, [orderId])
+
+  const toggleEvents = async () => {
+    if (eventsOpen) { setEventsOpen(false); return }
+    setEventsOpen(true)
+    if (!o) return
+    try {
+      setEvents(await equiposProvider.events(o.id))
+    } catch (e) {
+      setEvents([])
+      toast.error(apiError(e, 'No se pudo cargar el historial'))
+    }
+  }
 
   const quoteFreight = async () => {
     if (!o) return
@@ -243,6 +266,31 @@ export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Pro
                           ))}
                         </div>
                         <p className="text-slate-400">Toca un tamaño para usarlo como costo del flete. «Otra medida» depende de las dimensiones reales y no se ofrece.</p>
+                      </div>
+                    )}
+                    {sh.carrier_code === 'shalom' && (
+                      <div className="mt-1">
+                        <button type="button" className="text-xs text-indigo-600 hover:underline" onClick={() => void toggleEvents()}>
+                          {eventsOpen ? 'Ocultar historial de Shalom' : 'Ver historial de Shalom'}
+                        </button>
+                        {eventsOpen && (
+                          <ol className="mt-1.5 space-y-1.5 border-l-2 border-slate-200 pl-3 text-xs">
+                            {events === null && <li className="text-slate-400">Cargando…</li>}
+                            {events?.length === 0 && <li className="text-slate-400">Aún no hay movimientos guardados. Se llenan cuando Shalom avisa o al pulsar «Actualizar desde Shalom».</li>}
+                            {events?.map((ev) => (
+                              <li key={ev.id}>
+                                <span className="font-medium text-slate-700">{formatDateTime(ev.at)}</span>
+                                <span className="text-slate-400"> · {ev.source === 'webhook' ? 'Aviso de Shalom' : 'Consulta'}</span>
+                                {ev.status && <> · <b>{MILESTONE_LABEL[ev.status] ?? ev.status}</b></>}
+                                {ev.timeline.length > 0 && (
+                                  <span className="block text-slate-500">
+                                    {ev.timeline.map((m) => `${MILESTONE_LABEL[m.milestone] ?? m.milestone} ${m.fecha ? formatDateTime(m.fecha.replace(' ', 'T')) : ''}`.trim()).join(' → ')}
+                                  </span>
+                                )}
+                              </li>
+                            ))}
+                          </ol>
+                        )}
                       </div>
                     )}
                   </>
