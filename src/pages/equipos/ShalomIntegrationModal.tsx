@@ -15,6 +15,8 @@ export default function ShalomIntegrationModal({ open, onClose, onChanged }: { o
   const [st, setSt] = useState<ShalomSettings | null>(null)
   const [apiKey, setApiKey] = useState('')
   const [webhookUrl, setWebhookUrl] = useState('')
+  const [proEmail, setProEmail] = useState('')
+  const [proPassword, setProPassword] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
 
   const load = useCallback(async () => {
@@ -22,13 +24,14 @@ export default function ShalomIntegrationModal({ open, onClose, onChanged }: { o
       const s = await equiposProvider.getSettings()
       setSt(s)
       setWebhookUrl(s.webhook_url)
+      setProEmail(s.pro_email)
     } catch (e) {
       toast.error(apiError(e, 'No se pudo cargar la integración'))
     }
   }, [])
 
   useEffect(() => {
-    if (open) { setApiKey(''); void load() }
+    if (open) { setApiKey(''); setProPassword(''); void load() }
   }, [open, load])
 
   const run = async <T,>(key: string, fn: () => Promise<T>, ok: (r: T) => string) => {
@@ -49,6 +52,11 @@ export default function ShalomIntegrationModal({ open, onClose, onChanged }: { o
     ...(apiKey.trim() ? { api_key: apiKey.trim() } : {}),
     webhook_url: webhookUrl.trim(),
   }), () => { setApiKey(''); return 'Configuración guardada' })
+
+  const savePro = () => run('pro', () => equiposProvider.saveSettings({
+    pro_email: proEmail.trim(),
+    ...(proPassword.trim() ? { pro_password: proPassword } : {}),
+  }), () => { setProPassword(''); return 'Cuenta de Shalom Pro guardada' })
 
   const toggle = (enabled: boolean) => run('enable', () => equiposProvider.saveSettings({ enabled }), () => (enabled ? 'Integración activada' : 'Integración desactivada'))
 
@@ -82,6 +90,20 @@ export default function ShalomIntegrationModal({ open, onClose, onChanged }: { o
               <input type="checkbox" className="rounded" checked={st.enabled} disabled={!canEdit || busy !== null || !st.api_key_set} onChange={(e) => void toggle(e.target.checked)} />
               Integración activa (sin esto el sistema nunca llama a Shalom)
             </label>
+          </section>
+
+          <section className="space-y-2 border-t border-slate-100 pt-3">
+            <p className="text-xs font-semibold text-slate-400 uppercase">Cuenta de Shalom Pro (para cotizar fletes)</p>
+            <p className="text-slate-500">
+              Solo se usa para consultar tarifas; no crea guías. La clave se guarda cifrada y no se vuelve a mostrar{st.pro_password_set && <> (clave guardada)</>}.
+            </p>
+            {canEdit && (
+              <div className="grid sm:grid-cols-[1fr_1fr_auto] gap-2">
+                <input type="email" autoComplete="off" value={proEmail} onChange={(e) => setProEmail(e.target.value)} placeholder="Correo de Shalom Pro" aria-label="Correo de Shalom Pro" className={INPUT} />
+                <input type="password" autoComplete="new-password" value={proPassword} onChange={(e) => setProPassword(e.target.value)} placeholder={st.pro_password_set ? 'Nueva clave (opcional)' : 'Clave de Shalom Pro'} aria-label="Clave de Shalom Pro" className={INPUT} />
+                <button type="button" className={BTN_SECONDARY} disabled={busy !== null || !st.enabled || !proEmail.trim() || (!st.pro_password_set && !proPassword.trim()) || (proEmail.trim() === st.pro_email && !proPassword.trim())} onClick={() => void savePro()}>Guardar</button>
+              </div>
+            )}
           </section>
 
           <section className="space-y-2 border-t border-slate-100 pt-3">

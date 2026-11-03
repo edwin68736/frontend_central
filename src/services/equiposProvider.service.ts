@@ -10,6 +10,8 @@ export interface ShalomSettings {
   base_url: string
   api_key_set: boolean
   api_key_hint: string
+  pro_email: string
+  pro_password_set: boolean
   encryption_ready: boolean
   webhook_url: string
   webhook_secret_set: boolean
@@ -26,11 +28,23 @@ export interface ShalomSettingsInput {
   base_url?: string
   enabled?: boolean
   webhook_url?: string
+  pro_email?: string
+  pro_password?: string
+  clear_pro?: boolean
 }
 
 export interface SyncAgenciesResult { skipped: boolean; total: number; created: number; updated: number }
 export interface SyncShipmentsResult { checked: number; changed: number; failed: number }
 export interface ProviderLocation { id: number; kind: string; dep_id: number; prov_id: number; external_id: number; name: string; ubigeo: string }
+
+export interface TariffQuote {
+  currency: string
+  aereo: boolean
+  breakdown: Record<string, number>
+  origin: string
+  destination: string
+  from_cache: boolean
+}
 
 interface OrderResponse { data: OrderView; warnings?: string[] }
 const unwrap = (r: { data: OrderResponse }) => ({ order: r.data.data, warnings: r.data.warnings ?? [] })
@@ -49,5 +63,7 @@ export const equiposProvider = {
   districts: (depId: number, provId: number) => api.get<{ data: ProviderLocation[] }>(`${base}/provider/shalom/departments/${depId}/provinces/${provId}/districts`).then((r) => r.data.data ?? []),
 
   linkTracking: (orderId: number, code: string) => api.post<OrderResponse>(`${base}/orders/${orderId}/provider/link`, { code }, { timeout: 180_000 }).then(unwrap),
+  quoteTariff: (orderId: number, aereo = false) =>
+    api.post<{ data: TariffQuote }>(`${base}/orders/${orderId}/provider/tariff`, { aereo }, { timeout: 180_000 }).then((r) => r.data.data),
   refreshTracking: (orderId: number) => api.post<OrderResponse>(`${base}/orders/${orderId}/provider/refresh`, {}, { timeout: 180_000 }).then(unwrap),
 }

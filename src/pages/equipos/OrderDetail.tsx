@@ -9,7 +9,7 @@ import {
 } from '@/services/equiposOrders.service'
 import { apiError, BTN_PRIMARY, BTN_SECONDARY, formatDateTime, INPUT } from './common'
 import { fmtDate, money, PaymentBadge, ShipmentBadge, StatusBadge, UserBadge, ValidationBadge } from './ordersCommon'
-import { equiposProvider } from '@/services/equiposProvider.service'
+import { equiposProvider, type TariffQuote } from '@/services/equiposProvider.service'
 import { buildShippingLabel, openLabel } from './shippingLabel'
 import { useConfirm, type ConfirmOptions, type ConfirmResult } from './ConfirmProvider'
 import PaymentModal from './PaymentModal'
@@ -22,6 +22,11 @@ interface Props {
   onClose: () => void
   onChanged: () => void
   onEdit: (id: number) => void
+}
+
+/** Nombre visible de cada tipo de paquete de la tarifa de Shalom. */
+const TARIFF_LABEL: Record<string, string> = {
+  sobre: 'Sobre', caja_paquete_xxs: 'Caja XXS', caja_paquete_xs: 'Caja XS', caja_paquete_s: 'Caja S', caja_paquete_m: 'Caja M', caja_paquete_l: 'Caja L',
 }
 
 type DateAction = 'dispatch' | 'arrival' | 'pickup'
@@ -59,6 +64,8 @@ export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Pro
   const [retOpen, setRetOpen] = useState(false)
   const [dateAction, setDateAction] = useState<DateAction | null>(null)
   const [linkCode, setLinkCode] = useState('')
+  const [quote, setQuote] = useState<TariffQuote | null>(null)
+  const [quoting, setQuoting] = useState(false)
 
   const can = (p: string) => hasPermission(p)
 
@@ -108,6 +115,24 @@ export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Pro
   }
 
   const sh = o?.shipment ?? null
+
+  const quoteFreight = async () => {
+    if (!o) return
+    setQuoting(true)
+    try {
+      setQuote(await equiposProvider.quoteTariff(o.id))
+    } catch (e) {
+      setQuote(null)
+      toast.error(apiError(e, 'No se pudo cotizar el flete'))
+    } finally {
+      setQuoting(false)
+    }
+  }
+
+  const applyFreight = (amount: number) => {
+    if (!o || !sh) return
+    void act(() => equiposOrders.updateShippingData(o.id, { guide_number: sh.guide_number ?? '', freight_cost: amount, scheduled_dispatch_date: (sh.scheduled_dispatch_date ?? '').slice(0, 10) }), 'Flete actualizado')
+  }
   const waKinds: WaKind[] = !o || !sh ? [] : [
     ...(sh.status === 'en_transito' ? (['despachado'] as WaKind[]) : []),
     ...(sh.status === 'en_agencia' ? (['llego', 'recordatorio', 'vence_pronto'] as WaKind[]) : []),
@@ -187,6 +212,25 @@ export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Pro
                             </button>
                           </>
                         ) : null}
+                        {can('equipos.shipments') && sh.status === 'pendiente_envio' && (
+                          <button type="button" className={BTN_SECONDARY + ' !py-1 !text-xs'} disabled={busy || quoting} onClick={() => void quoteFreight()}>
+                            {quoting ? 'Cotizando…' : 'Cotizar flete'}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    {quote && sh.status === 'pendiente_envio' && (
+                      <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs space-y-1">
+                        <p className="text-slate-500">{quote.origin} → {quote.destination}{quote.aereo ? ' (aéreo)' : ''}{quote.from_cache ? ' · tarifa guardada' : ''}</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {Object.entries(quote.breakdown).filter(([k]) => k !== 'otra_medida').map(([k, v]) => (
+                            <button key={k} type="button" disabled={busy} title="Usar como costo del flete" onClick={() => void applyFreight(v)}
+                              className="px-2 py-1 rounded-md border border-slate-300 bg-white hover:bg-indigo-50 hover:border-indigo-300">
+                              {TARIFF_LABEL[k] ?? k}: <b>{quote.currency === 'PEN' ? 'S/ ' : ''}{v.toFixed(2)}</b>
+                            </button>
+                          ))}
+                        </div>
+                        <p className="text-slate-400">Toca un tamaño para usarlo como costo del flete. «Otra medida» depende de las dimensiones reales y no se ofrece.</p>
                       </div>
                     )}
                   </>
