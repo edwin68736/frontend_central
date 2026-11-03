@@ -12,7 +12,7 @@ import { fmtDate, money, PaymentBadge, ShipmentBadge, StatusBadge, UserBadge, Va
 import { buildShippingLabel, openLabel } from './shippingLabel'
 import { useConfirm, type ConfirmOptions, type ConfirmResult } from './ConfirmProvider'
 import PaymentModal from './PaymentModal'
-import ArrivalModal from './ArrivalModal'
+import ShipmentDateModal from './ShipmentDateModal'
 import ReturnModal from './ReturnModal'
 import { waLink, waText, WA_LABEL, type WaKind } from './whatsapp'
 
@@ -23,6 +23,31 @@ interface Props {
   onEdit: (id: number) => void
 }
 
+type DateAction = 'dispatch' | 'arrival' | 'pickup'
+
+/** Textos del modal de fecha: cualquier día pasado vale, para registrar envíos que ya ocurrieron. */
+function dateActionTexts(kind: DateAction, o: OrderView | null, sh: OrderView['shipment'] | null) {
+  switch (kind) {
+    case 'dispatch':
+      return {
+        title: 'Despachar pedido',
+        description: o ? `El pedido N° ${o.order_number} saldrá por ${sh?.carrier_name || 'el transportista'} con la guía ${sh?.guide_number || 's/n'}. Si ya salió, indica el día real de salida.` : '',
+        label: 'Fecha de despacho', confirmLabel: 'Despachar',
+      }
+    case 'arrival':
+      return {
+        title: 'Registrar llegada a agencia',
+        description: 'Indica el día en que el paquete llegó a la agencia de destino. Desde esa fecha corre el plazo de recojo. Si es anterior al despacho registrado, el despacho se ajusta a esa fecha.',
+        label: 'Fecha de llegada', confirmLabel: 'Registrar llegada',
+      }
+    default:
+      return {
+        title: 'Cliente recogió',
+        description: o && o.balance_amount > 0 ? `El cliente aún debe ${money(o.balance_amount)}. Se registrará el recojo igualmente. Indica el día en que recogió.` : 'Indica el día en que el cliente recogió el paquete.',
+        label: 'Fecha de recojo', confirmLabel: 'Registrar recojo',
+      }
+  }
+}
 
 export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Props) {
   const { hasPermission } = useAuth()
@@ -31,7 +56,7 @@ export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Pro
   const [payOpen, setPayOpen] = useState(false)
   const confirm = useConfirm()
   const [retOpen, setRetOpen] = useState(false)
-  const [arrOpen, setArrOpen] = useState(false)
+  const [dateAction, setDateAction] = useState<DateAction | null>(null)
 
   const can = (p: string) => hasPermission(p)
 
@@ -218,13 +243,13 @@ export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Pro
                 <button type="button" className={BTN_SECONDARY} disabled={busy} onClick={() => void guard({ title: 'Observar pedido', input: { label: '¿Qué hay que corregir?', required: true }, confirmLabel: 'Observar' }, (r) => equiposOrders.observeOrder(o.id, r.text), 'Pedido observado')}>Observar</button>
               )}
               {o.status === 'registrado' && sh?.status === 'pendiente_envio' && can('equipos.shipments') && (
-                <button type="button" className={BTN_PRIMARY} disabled={busy || o.validation_status !== 'validado'} title={o.validation_status !== 'validado' ? 'Primero valida los datos del pedido' : ''} onClick={() => void guard({ title: 'Despachar pedido', message: `El pedido N° ${o.order_number} saldrá por ${sh?.carrier_name || 'el transportista'} con la guía ${sh?.guide_number || 's/n'}.`, confirmLabel: 'Despachar' }, () => equiposOrders.dispatch(o.id), 'Pedido despachado')}><Truck size={15} /> Despachar</button>
+                <button type="button" className={BTN_PRIMARY} disabled={busy || o.validation_status !== 'validado'} title={o.validation_status !== 'validado' ? 'Primero valida los datos del pedido' : ''} onClick={() => setDateAction('dispatch')}><Truck size={15} /> Despachar</button>
               )}
               {sh?.status === 'en_transito' && can('equipos.shipments') && (
-                <button type="button" className={BTN_PRIMARY} disabled={busy} onClick={() => setArrOpen(true)}>Marcar llegada a agencia</button>
+                <button type="button" className={BTN_PRIMARY} disabled={busy} onClick={() => setDateAction('arrival')}>Marcar llegada a agencia</button>
               )}
               {(sh?.status === 'en_agencia' || sh?.status === 'en_transito') && can('equipos.shipments') && (
-                <button type="button" className={BTN_SECONDARY} disabled={busy} onClick={() => void guard({ title: 'Cliente recogió', message: o.balance_amount > 0 ? `El cliente aún debe ${money(o.balance_amount)}. Se registrará el recojo igualmente.` : 'Se registrará que el cliente recogió el paquete.', confirmLabel: 'Registrar recojo' }, () => equiposOrders.pickedUp(o.id), 'Recojo registrado')}>Cliente recogió</button>
+                <button type="button" className={BTN_SECONDARY} disabled={busy} onClick={() => setDateAction('pickup')}>Cliente recogió</button>
               )}
               {o.status === 'registrado' && can('equipos.payments') && o.payment_status !== 'pagado' && (
                 <button type="button" className={BTN_SECONDARY} disabled={busy} onClick={() => void guard({ title: o.payment_status === 'no_pago' ? 'Quitar «sin pago»' : 'Marcar sin pago', message: 'Cambia si este pedido se cobra. Requiere tu PIN.', pin: true, confirmLabel: 'Confirmar' }, (r) => equiposOrders.setNoPayment(o.id, o.payment_status !== 'no_pago', r.pin), o.payment_status === 'no_pago' ? 'Marca de sin pago quitada' : 'Marcado sin pago (obsequio/cortesía)')}>
@@ -259,8 +284,16 @@ export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Pro
         customerId={o?.customer_id ?? null} customerName={o?.customer_name ?? ''} orderId={o?.id} suggestedAmount={o && o.balance_amount > 0 ? o.balance_amount : undefined}
       />
 
-      <ArrivalModal open={arrOpen} busy={busy} onClose={() => setArrOpen(false)}
-        onConfirm={(d) => { setArrOpen(false); void act(() => equiposOrders.arrived(o!.id, d), 'Llegada registrada') }} />
+      <ShipmentDateModal
+        open={dateAction !== null} busy={busy} onClose={() => setDateAction(null)}
+        {...dateActionTexts(dateAction ?? 'dispatch', o, sh)}
+        onConfirm={(d) => {
+          const kind = dateAction
+          setDateAction(null)
+          if (kind === 'dispatch') void act(() => equiposOrders.dispatch(o!.id, d), 'Pedido despachado')
+          else if (kind === 'arrival') void act(() => equiposOrders.arrived(o!.id, d), 'Llegada registrada')
+          else if (kind === 'pickup') void act(() => equiposOrders.pickedUp(o!.id, d), 'Recojo registrado')
+        }} />
 
       <ReturnModal open={retOpen} orderId={o?.id ?? null} onClose={() => setRetOpen(false)} onDone={() => { void load(); onChanged() }} />
 
