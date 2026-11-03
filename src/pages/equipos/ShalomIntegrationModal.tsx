@@ -149,9 +149,9 @@ export default function ShalomIntegrationModal({ open, onClose, onChanged }: { o
           {canSyncShipments && (
             <section className="space-y-2 border-t border-slate-100 pt-3">
               <p className="text-xs font-semibold text-slate-400 uppercase">Alinear envíos existentes</p>
-              <p className="text-slate-500">Consulta a Shalom (de a 50 guías) los envíos en tránsito o en agencia que ya tienen N° de guía y código, y corrige sus fechas y estados.</p>
+              <p className="text-slate-500">Consulta a Shalom (de a 50 guías) los envíos pendientes, en tránsito o en agencia cuya guía tenga el formato «número - código» (ej. 100439617 - M7JK), y corrige sus fechas y estados.</p>
               <button type="button" className={BTN_SECONDARY} disabled={busy !== null || !st.enabled}
-                onClick={() => void run('ship', () => equiposProvider.syncShipments(), (r) => `Revisados ${r.checked}: ${r.changed} actualizados, ${r.failed} sin datos`)}>
+                onClick={() => void run('ship', () => equiposProvider.syncShipments(), (r) => `Revisados ${r.checked}: ${r.changed} actualizados, ${r.failed} sin datos en Shalom${r.skipped ? `, ${r.skipped} sin guía con formato Shalom` : ""}`)}>
                 <RefreshCw size={13} className={busy === 'ship' ? 'animate-spin' : ''} /> Alinear con Shalom
               </button>
             </section>

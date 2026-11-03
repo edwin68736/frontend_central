@@ -24,6 +24,10 @@ interface Props {
   onEdit: (id: number) => void
 }
 
+/** La guía de Shalom se registra como «NÚMERO - CÓDIGO» (ej. «100439617 - M7JK»): devuelve el código si ya viene en ella. */
+const SHALOM_GUIDE_RE = /^\s*\d{8,10}\s*[-–—]?\s*([A-Za-z0-9]{4})\s*$/
+const guideCodeOf = (guide?: string | null) => SHALOM_GUIDE_RE.exec(guide ?? '')?.[1]?.toUpperCase() ?? ''
+
 /** Nombre visible de cada tipo de paquete de la tarifa de Shalom. */
 const TARIFF_LABEL: Record<string, string> = {
   sobre: 'Sobre', caja_paquete_xxs: 'Caja XXS', caja_paquete_xs: 'Caja XS', caja_paquete_s: 'Caja S', caja_paquete_m: 'Caja M', caja_paquete_l: 'Caja L',
@@ -202,6 +206,14 @@ export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Pro
                                 <RefreshCw size={12} /> Actualizar desde Shalom
                               </button>
                             )}
+                          </>
+                        ) : can('equipos.shipments') && guideCodeOf(sh.guide_number) ? (
+                          <>
+                            <span className="text-slate-500">Código en la guía: <b className="font-mono">{guideCodeOf(sh.guide_number)}</b></span>
+                            <button type="button" className={BTN_SECONDARY + ' !py-1 !text-xs'} disabled={busy}
+                              onClick={() => void act(() => equiposProvider.linkTracking(o.id, ''), 'Seguimiento de Shalom vinculado')}>
+                              Vincular seguimiento
+                            </button>
                           </>
                         ) : can('equipos.shipments') && sh.guide_number ? (
                           <>

@@ -34,7 +34,7 @@ export interface ShalomSettingsInput {
 }
 
 export interface SyncAgenciesResult { skipped: boolean; total: number; created: number; updated: number }
-export interface SyncShipmentsResult { checked: number; changed: number; failed: number }
+export interface SyncShipmentsResult { checked: number; changed: number; failed: number; skipped: number }
 export interface ProviderLocation { id: number; kind: string; dep_id: number; prov_id: number; external_id: number; name: string; ubigeo: string }
 
 export interface TariffQuote {
