@@ -56,13 +56,18 @@ export function getTenantUrl(slug: string): string {
   return `${protocol}://${host}`
 }
 
-/** URL de acceso maestro: misma base que el enlace slug + token en query. */
+/**
+ * URL de acceso maestro: misma base que el enlace slug + código de canje de UN SOLO USO (30 s).
+ * Ya no se pone el JWT en la URL de la página (historial, logs de proxy, Referer). Si el servidor aún no devuelve código
+ * (backend antiguo) se usa el token heredado.
+ */
 export function buildMasterAccessUrl(
   tenant: { slug: string; tenant_url?: string },
-  token: string,
+  access: { code?: string; token?: string },
 ): string {
   const base = resolveTenantUrl(tenant)
-  return `${base}/?master_sso=${encodeURIComponent(token)}`
+  if (access.code) return `${base}/?master_code=${encodeURIComponent(access.code)}`
+  return `${base}/?master_sso=${encodeURIComponent(access.token ?? '')}`
 }
 
 /** Prefiere tenant_url de la API; si no, construye con root domain. */

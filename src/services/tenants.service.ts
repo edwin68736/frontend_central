@@ -211,8 +211,8 @@ export const tenantsService = {
   },
 
   /** Acceso maestro al ERP web del tenant (solo superadmin). */
-  async masterAccess(id: number): Promise<{ tenant_url: string; token: string }> {
-    const { data } = await api.post<{ tenant_url: string; token: string }>(
+  async masterAccess(id: number): Promise<{ tenant_url: string; code?: string; token?: string }> {
+    const { data } = await api.post<{ tenant_url: string; code?: string; token?: string }>(
       `/superadmin/tenants/${id}/master-access`,
     )
     return data

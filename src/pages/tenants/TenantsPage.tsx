@@ -860,8 +860,8 @@ export default function TenantsPage() {
     if (!masterAccessTenant) return
     setMasterAccessLoading(true)
     try {
-      const { token } = await tenantsService.masterAccess(masterAccessTenant.id)
-      const url = buildMasterAccessUrl(masterAccessTenant, token)
+      const access = await tenantsService.masterAccess(masterAccessTenant.id)
+      const url = buildMasterAccessUrl(masterAccessTenant, access)
       window.open(url, '_blank', 'noopener,noreferrer')
       toast.success(`Acceso maestro abierto para ${masterAccessTenant.name}`)
       setMasterAccessTenant(null)
