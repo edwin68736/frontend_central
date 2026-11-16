@@ -45,7 +45,9 @@ export default function EquiposNotificationsBell() {
       setUnread((u) => Math.max(0, u - 1))
       void equiposProvider.markNotificationsRead({ ids: [n.id] })
     }
-    navigate(`/equipos?tab=pedidos&order=${n.order_id}`)
+    // Los avisos de retorno abren la pestaña de retornos (el retorno puede no tener un pedido abierto en pantalla).
+    if (n.kind.startsWith('retorno')) navigate('/equipos?tab=retornos')
+    else navigate(`/equipos?tab=pedidos&order=${n.order_id}`)
   }
 
   const markAll = () => {

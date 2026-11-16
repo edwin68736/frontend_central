@@ -22,6 +22,12 @@ export interface EquipReturnView {
   status: 'solicitado' | 'en_camino' | 'recibido' | 'desechado_por_agencia' | 'anulado'
   cancelled_at?: string | null
   cancel_reason?: string
+  /** Seguimiento de la guía del retorno en Shalom. track_stage: origen | transito | destino | entregado ('' = sin seguimiento). */
+  provider_code?: string
+  provider_status?: string
+  provider_synced_at?: string | null
+  track_stage?: '' | 'origen' | 'transito' | 'destino' | 'entregado'
+  track_label?: string
   condition: 'buen_estado' | 'danado'
   action_taken: string
   notes: string
@@ -137,6 +143,13 @@ export const equiposControl = {
   listReturns: (status?: string) => api.get<{ data: EquipReturnView[] }>(`${base}/returns`, { params: { status } }).then((r) => r.data.data ?? []),
   createReturn: (b: ReturnInput, pin?: string) => api.post<{ data: EquipReturnView }>(`${base}/returns`, b, pin ? { headers: { 'X-Security-Pin': pin } } : undefined).then((r) => r.data.data),
   updateReturn: (id: number, b: ReturnUpdate) => api.put<{ data: EquipReturnView }>(`${base}/returns/${id}`, b).then((r) => r.data.data),
+  /** Guarda la guía del retorno y, si es de Shalom (con código), la vincula. Devuelve avisos de lo que faltó. */
+  setReturnGuide: (id: number, guide_number: string, code?: string) =>
+    api.patch<{ data: EquipReturnView; warnings?: string[] }>(`${base}/returns/${id}/guide`, { guide_number, code }).then((r) => ({ view: r.data.data, warnings: r.data.warnings ?? [] })),
+  refreshReturnTracking: (id: number) => api.post<{ data: EquipReturnView }>(`${base}/returns/${id}/provider/refresh`).then((r) => r.data.data),
+  /** Casilla «Recibido»: cierra el retorno; en buen estado reingresa al stock. */
+  receiveReturn: (id: number, condition: 'buen_estado' | 'danado') =>
+    api.post<{ data: EquipReturnView }>(`${base}/returns/${id}/receive`, { condition }).then((r) => r.data.data),
   cancelReturn: (id: number, reason: string, pin?: string) =>
     api.post<{ data: EquipReturnView }>(`${base}/returns/${id}/cancel`, { reason }, pin ? { headers: { 'X-Security-Pin': pin } } : undefined).then((r) => r.data.data),
   reship: (id: number) => api.post<{ data: OrderView }>(`${base}/returns/${id}/reship`).then((r) => r.data.data),
