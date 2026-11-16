@@ -16,6 +16,7 @@ import {
 } from '@/services/equipos.service'
 import PaginationBar from '@/components/ui/PaginationBar'
 import SearchSelect from '@/components/ui/SearchSelect'
+import { equiposWarehouses, type Warehouse } from '@/services/equiposWarehouses.service'
 import { useConfirm } from './ConfirmProvider'
 import { useDebounced, usePaging } from './hooks'
 import { apiError, BTN_PRIMARY, BTN_SECONDARY, currentPeriod, formatDateTime, INPUT, LABEL, SemaphoreBadge } from './common'
@@ -28,6 +29,8 @@ const MOVEMENT_LABEL: Record<string, string> = {
   reingreso_retorno: 'Reingreso por retorno',
   ajuste: 'Ajuste',
   baja: 'Baja',
+  transferencia_salida: 'Transferencia (sale)',
+  transferencia_ingreso: 'Transferencia (llega)',
 }
 
 const num = (n: number) => (n === 0 ? <span className="text-slate-300">0</span> : n)
@@ -52,6 +55,12 @@ export default function StockTab() {
   const [saving, setSaving] = useState(false)
   const confirm = useConfirm()
   const dq = useDebounced(q, 450)
+  // Almacenes: el ingreso de mercadería importada suele ir al depósito; lo demás, al Almacén 1.
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([])
+  const [warehouseId, setWarehouseId] = useState<number | ''>('')
+  useEffect(() => { equiposWarehouses.list().then(setWarehouses).catch(() => setWarehouses([])) }, [])
+  const mainWh = warehouses.find((w) => w.is_default)
+  const depotWh = warehouses.find((w) => !w.is_default)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -162,6 +171,7 @@ export default function StockTab() {
         occurred_at: form.date ? new Date(`${form.date}T12:00:00`).toISOString() : undefined,
         note: form.note.trim(),
         unit_cost: form.type === 'ingreso' && form.cost !== '' ? Number(form.cost) : undefined,
+        warehouse_id: warehouseId === '' ? undefined : Number(warehouseId),
       }, ok.pin || undefined)
       toast.success('Movimiento registrado')
       setForm((f) => ({ ...f, open: false }))
@@ -366,6 +376,15 @@ export default function StockTab() {
               <input type="date" value={form.date} onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))} className={INPUT} />
             </div>
           </div>
+          {warehouses.length > 1 && (
+            <div>
+              <label className={LABEL}>Almacén</label>
+              <select value={warehouseId === '' ? (mainWh?.id ?? '') : warehouseId} onChange={(e) => setWarehouseId(e.target.value ? Number(e.target.value) : '')} className={INPUT}>
+                {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}{w.is_default ? ' · el que vende' : ''}</option>)}
+              </select>
+              {form.type === 'ingreso' && depotWh && <p className="text-[11px] text-slate-500 mt-0.5">Mercadería importada: ingrésala a {depotWh.name} y luego pídela al Almacén 1 con un requerimiento.</p>}
+            </div>
+          )}
           {form.type === 'ingreso' && (
             <div>
               <label className={LABEL}>Costo unitario de compra (opcional)</label>

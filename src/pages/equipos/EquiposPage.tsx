@@ -1,6 +1,6 @@
 import { Suspense, lazy } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Banknote, BarChart3, Boxes, ClipboardList, LayoutDashboard, Layers, PackageCheck, RotateCcw, Settings2, Truck, Upload, Warehouse } from 'lucide-react'
+import { ArrowLeftRight, Banknote, BarChart3, Boxes, ClipboardList, LayoutDashboard, Layers, PackageCheck, RotateCcw, Settings2, Truck, Upload, Warehouse } from 'lucide-react'
 import Spinner from '@/components/ui/Spinner'
 import Forbidden from '@/components/auth/Forbidden'
 import { useAuth } from '@/contexts/AuthContext'
@@ -18,6 +18,7 @@ const CatalogTab = lazy(() => import('./CatalogTab'))
 const CarriersTab = lazy(() => import('./CarriersTab'))
 const ImportTab = lazy(() => import('./ImportTab'))
 const SettingsTab = lazy(() => import('./SettingsTab'))
+const WarehousesTab = lazy(() => import('./WarehousesTab'))
 
 const TABS = [
   { key: 'panel', label: 'Panel', icon: LayoutDashboard, permission: 'equipos.view', Component: DashboardTab },
@@ -28,6 +29,7 @@ const TABS = [
   { key: 'retornos', label: 'Retornos', icon: RotateCcw, permission: 'equipos.view', Component: ReturnsTab },
   { key: 'reportes', label: 'Reportes', icon: BarChart3, permission: 'equipos.reports', Component: ReportsTab },
   { key: 'stock', label: 'Stock', icon: Boxes, permission: 'equipos.stock_view', Component: StockTab },
+  { key: 'almacenes', label: 'Almacenes', icon: ArrowLeftRight, permission: 'equipos.stock_view', Component: WarehousesTab },
   { key: 'catalogo', label: 'Catálogo', icon: Layers, permission: 'equipos.view', Component: CatalogTab },
   { key: 'transportistas', label: 'Transportistas', icon: Truck, permission: 'equipos.view', Component: CarriersTab },
   { key: 'importar', label: 'Importar Excel', icon: Upload, permission: 'equipos.import', Component: ImportTab },

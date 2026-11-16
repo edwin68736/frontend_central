@@ -187,6 +187,8 @@ export interface EquipMovementInput {
   occurred_at?: string
   note: string
   unit_cost?: number
+  /** Almacén del movimiento (vacío = Almacén 1). */
+  warehouse_id?: number
 }
 
 export interface ImportIssue {
