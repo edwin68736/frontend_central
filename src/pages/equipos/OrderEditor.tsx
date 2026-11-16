@@ -28,7 +28,7 @@ const emptyShipment = (carrierId: number | null) => ({
 })
 
 const emptyForm = (carrierId: number | null): OrderInput => ({
-  customer_id: null, customer_name: '', customer_doc_type: 'DNI', customer_doc_number: '', contact_dni: '', contact_name: '', customer_phone: '',
+  customer_id: null, customer_name: '', customer_doc_type: 'DNI', customer_doc_number: '', contact_doc_type: 'DNI', contact_dni: '', contact_name: '', customer_phone: '',
   save_customer: true, sale_type: 'independiente', order_date: todayISO(), billing_doc_type: 'ninguno', notes: '',
   items: [emptyItem()], shipment: emptyShipment(carrierId),
 })
@@ -36,7 +36,7 @@ const emptyForm = (carrierId: number | null): OrderInput => ({
 function fromView(o: OrderView): OrderInput {
   return {
     customer_id: o.customer_id, customer_name: o.customer_name, customer_doc_type: o.customer_doc_type || 'DNI',
-    customer_doc_number: o.customer_doc_number, contact_dni: o.contact_dni, contact_name: o.contact_name ?? '', customer_phone: o.customer_phone, save_customer: false,
+    customer_doc_number: o.customer_doc_number, contact_doc_type: o.contact_doc_type || 'DNI', contact_dni: o.contact_dni, contact_name: o.contact_name ?? '', customer_phone: o.customer_phone, save_customer: false,
     sale_type: o.sale_type, order_date: toDateInput(o.order_date), billing_doc_type: o.billing_doc_type || 'ninguno', notes: o.notes,
     items: o.items.map((i) => ({
       line_type: i.line_type, product_id: i.product_id, combo_id: i.combo_id, description: i.description, plan_months: i.plan_months,
@@ -68,6 +68,7 @@ export default function OrderEditor({ open, onClose, orderId, onSaved }: Props) 
   const [products, setProducts] = useState<EquipProduct[]>([])
   const [combos, setCombos] = useState<EquipCombo[]>([])
   const [carriers, setCarriers] = useState<EquipCarrier[]>([])
+  const [plans, setPlans] = useState<{ id: number; name: string; price: number }[]>([])
   const [form, setForm] = useState<OrderInput>(emptyForm(null))
   const [status, setStatus] = useState<string>('borrador')
   const [createdId, setCreatedId] = useState<number | null>(null)
@@ -89,9 +90,9 @@ export default function OrderEditor({ open, onClose, orderId, onSaved }: Props) 
     ;(async () => {
       setLoading(true)
       try {
-        const [p, c, ca] = await Promise.all([equiposService.listProducts(), equiposService.listCombos(), equiposService.listCarriers(false)])
+        const [p, c, ca, pl] = await Promise.all([equiposService.listProducts(), equiposService.listCombos(), equiposService.listCarriers(false), equiposOrders.listPlans().catch(() => [])])
         if (!alive) return
-        setProducts(p.products); setCombos(c); setCarriers(ca)
+        setProducts(p.products); setCombos(c); setCarriers(ca); setPlans(pl)
         const def = ca.find((x) => x.is_default)?.id ?? ca[0]?.id ?? null
         if (orderId) {
           const o = await equiposOrders.getOrder(orderId)
@@ -241,18 +242,18 @@ export default function OrderEditor({ open, onClose, orderId, onSaved }: Props) 
   }
   const debPickup = useDebounced(form.contact_dni, 600)
   useEffect(() => {
-    if (!open || !otherPickup || orderId) return
+    if (!open || !otherPickup || orderId || form.contact_doc_type !== 'DNI') return
     if (/^\d{8}$/.test(debPickup)) void runPickupLookup(debPickup, true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debPickup, otherPickup, open])
   const togglePickup = (on: boolean) => {
     setOtherPickup(on)
-    if (!on) setForm((f) => ({ ...f, contact_dni: '', contact_name: '' }))
+    if (!on) setForm((f) => ({ ...f, contact_doc_type: 'DNI', contact_dni: '', contact_name: '' }))
   }
   const pickCustomer = (c: EquipCustomerRow) => {
     setForm((f) => ({
       ...f, customer_id: c.id, customer_name: c.name, customer_doc_type: c.doc_type, customer_doc_number: c.doc_number ?? '',
-      contact_dni: c.contact_dni, contact_name: '', customer_phone: c.phone, save_customer: false,
+      contact_doc_type: 'DNI', contact_dni: c.contact_dni, contact_name: '', customer_phone: c.phone, save_customer: false,
     }))
     setOtherPickup(!!c.contact_dni)
     setSearch(''); setFound([])
@@ -267,7 +268,9 @@ export default function OrderEditor({ open, onClose, orderId, onSaved }: Props) 
       if (f.customer_doc_type === 'RUC' && !/^\d{11}$/.test(doc)) return 'El RUC debe tener 11 dígitos'
     } else if (f.save_customer) return 'Para guardar el cliente indica su documento'
     if (otherPickup) {
-      if (!/^\d{8}$/.test(f.contact_dni)) return 'El DNI de quien recoge debe tener 8 dígitos'
+      if (f.contact_doc_type === 'CE') {
+        if (!/^[A-Za-z0-9]{9,12}$/.test(f.contact_dni)) return 'El carné de extranjería de quien recoge debe tener entre 9 y 12 letras o dígitos'
+      } else if (!/^\d{8}$/.test(f.contact_dni)) return 'El DNI de quien recoge debe tener 8 dígitos'
       if (!f.contact_name.trim()) return 'Indica el nombre de quien recoge'
     }
     const phone = f.customer_phone.replace(/[\s-]/g, '')
@@ -281,6 +284,8 @@ export default function OrderEditor({ open, onClose, orderId, onSaved }: Props) 
       if (!(it.quantity > 0)) return `${tag}: la cantidad debe ser mayor a 0`
       if (it.unit_price < 0) return `${tag}: el precio no puede ser negativo`
     }
+    // Envío por agencia: no se guarda ni se confirma sin agencia de destino (de la lista o escrita a mano).
+    if (isAgency && !form.shipment?.destination_agency_id && !(form.shipment?.destination_agency ?? '').trim()) return 'Elige la agencia de destino'
     const g = form.shipment?.guide_number.trim()
     if (g && carrier?.guide_format) {
       try {
@@ -445,10 +450,18 @@ export default function OrderEditor({ open, onClose, orderId, onSaved }: Props) 
             {otherPickup && (
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 rounded-lg bg-slate-50 p-3">
                 <div>
-                  <label className={LABEL}>DNI de quien recoge</label>
+                  <label className={LABEL}>Tipo de documento</label>
+                  <select value={form.contact_doc_type} onChange={(e) => setForm((f) => ({ ...f, contact_doc_type: e.target.value, contact_dni: '', contact_name: '' }))} className={INPUT}>
+                    <option value="DNI">DNI</option><option value="CE">C. extranjería</option>
+                  </select>
+                </div>
+                <div>
+                  <label className={LABEL}>{form.contact_doc_type === 'CE' ? 'C.E. de quien recoge' : 'DNI de quien recoge'}</label>
                   <div className="flex gap-1">
-                    <input value={form.contact_dni} onChange={(e) => set('contact_dni', e.target.value.trim())} className={INPUT} />
-                    <button type="button" className={BTN_SECONDARY} disabled={lookingPickup || form.contact_dni.length !== 8} onClick={() => void runPickupLookup(form.contact_dni, false)}>{lookingPickup ? '…' : 'Consultar'}</button>
+                    <input value={form.contact_dni} maxLength={form.contact_doc_type === 'CE' ? 12 : 8} onChange={(e) => set('contact_dni', form.contact_doc_type === 'CE' ? e.target.value.trim().toUpperCase() : e.target.value.replace(/\D/g, ''))} className={INPUT} />
+                    {form.contact_doc_type === 'DNI' && (
+                      <button type="button" className={BTN_SECONDARY} disabled={lookingPickup || form.contact_dni.length !== 8} onClick={() => void runPickupLookup(form.contact_dni, false)}>{lookingPickup ? '…' : 'Consultar'}</button>
+                    )}
                   </div>
                 </div>
                 <div className="col-span-2">
@@ -461,18 +474,12 @@ export default function OrderEditor({ open, onClose, orderId, onSaved }: Props) 
           </section>
 
           {/* Datos del pedido */}
-          <section className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <section className="grid grid-cols-2 lg:grid-cols-3 gap-3">
             <div><label className={LABEL}>Fecha del pedido</label><input type="date" max={todayISO()} value={form.order_date} onChange={(e) => set('order_date', e.target.value)} className={INPUT} /></div>
             <div>
               <label className={LABEL}>Tipo de venta</label>
               <select value={form.sale_type} onChange={(e) => set('sale_type', e.target.value as SaleType)} className={INPUT}>
                 <option value="independiente">Independiente</option><option value="promo_tk">Promo TK</option>
-              </select>
-            </div>
-            <div>
-              <label className={LABEL}>Comprobante</label>
-              <select value={form.billing_doc_type} onChange={(e) => set('billing_doc_type', e.target.value)} className={INPUT}>
-                <option value="ninguno">Ninguno</option><option value="boleta">Boleta</option><option value="factura">Factura</option>
               </select>
             </div>
             <div><label className={LABEL}>Observaciones</label><input value={form.notes} onChange={(e) => set('notes', e.target.value)} className={INPUT} /></div>
@@ -510,11 +517,32 @@ export default function OrderEditor({ open, onClose, orderId, onSaved }: Props) 
                             setItem(i, { combo_id: cb?.id ?? null, unit_price: cb ? cb.reference_price : 0 })
                           }} />
                       )}
-                      {(it.line_type === 'plan' || it.line_type === 'otro') && (
-                        <input aria-label="Descripción" value={it.description} onChange={(e) => setItem(i, { description: e.target.value })} placeholder={it.line_type === 'plan' ? 'Ej. Plan Emprendedor' : 'Descripción'} className={INPUT} />
+                      {it.line_type === 'otro' && (
+                        <input aria-label="Descripción" value={it.description} onChange={(e) => setItem(i, { description: e.target.value })} placeholder="Descripción" className={INPUT} />
                       )}
                       {it.line_type === 'plan' && (
-                        <input type="number" min={0} aria-label="Meses del plan" value={it.plan_months || ''} onChange={(e) => setItem(i, { plan_months: Number(e.target.value) })} placeholder="Meses" className={INPUT} />
+                        <select aria-label="Plan de Tukifac" value={it.description} className={INPUT}
+                          onChange={(e) => {
+                            const pl = plans.find((x) => x.name === e.target.value)
+                            const months = it.plan_months > 0 ? it.plan_months : 1
+                            // Elegir el plan propone el precio de lista (mensual × meses); sigue siendo editable.
+                            setItem(i, { description: e.target.value, plan_months: months, ...(pl ? { unit_price: Math.round(pl.price * months * 100) / 100 } : {}) })
+                          }}>
+                          <option value="">Elegir plan…</option>
+                          {plans.map((pl) => <option key={pl.id} value={pl.name}>{pl.name}</option>)}
+                          {/* Pedidos antiguos con un plan escrito a mano: se conserva su descripción. */}
+                          {it.description && !plans.some((pl) => pl.name === it.description) && <option value={it.description}>{it.description}</option>}
+                        </select>
+                      )}
+                      {it.line_type === 'plan' && (
+                        <input type="number" min={0} aria-label="Meses del plan" value={it.plan_months || ''}
+                          onChange={(e) => {
+                            const months = Number(e.target.value)
+                            const pl = plans.find((x) => x.name === it.description)
+                            // Si el precio aún es el de lista del plan, acompaña el cambio de meses; si ya lo ajustaron a mano, no se toca.
+                            const listed = pl ? Math.round(pl.price * Math.max(it.plan_months, 1) * 100) / 100 : null
+                            setItem(i, { plan_months: months, ...(pl && listed !== null && it.unit_price === listed && months > 0 ? { unit_price: Math.round(pl.price * months * 100) / 100 } : {}) })
+                          }} placeholder="Meses" className={INPUT} />
                       )}
                     </div>
                     <input type="number" min={0} step="1" aria-label="Cantidad" value={it.quantity} onChange={(e) => setItem(i, { quantity: Number(e.target.value) })} className={INPUT + ' col-span-3 sm:col-span-1 text-right'} />
@@ -581,12 +609,6 @@ export default function OrderEditor({ open, onClose, orderId, onSaved }: Props) 
                       options={agOptions} onChange={(v) => pickAgency(v ? Number(v) : null)} />
                     <button type="button" className="text-[11px] text-indigo-600 hover:underline mt-0.5" onClick={() => { setManualAgency(true); setShip({ destination_agency_id: null }) }}>La agencia no está en la lista: escribirla a mano</button>
                   </div>
-                  <div>
-                    <label className={LABEL}>Agencia de origen</label>
-                    <SearchSelect value={form.shipment?.origin_agency_id} placeholder="Sin definir" searchPlaceholder="Buscar agencia…" clearable
-                      options={agencies.map((a) => ({ value: a.id, label: a.name, hint: [a.district, a.department].filter(Boolean).join(' · ') }))}
-                      onChange={(v) => setShip({ origin_agency_id: v ? Number(v) : null })} />
-                  </div>
                 </>
               ) : (
                 <>
@@ -604,20 +626,8 @@ export default function OrderEditor({ open, onClose, orderId, onSaved }: Props) 
                   </div>
                 </>
               )}
-              {isAgency && (
-                <>
-                  <div><label className={LABEL}>{carrier?.guide_label || 'N° de guía'} (opcional ahora)</label><input value={form.shipment?.guide_number ?? ''} onChange={(e) => setShip({ guide_number: e.target.value.trim() })} className={INPUT} /></div>
-                  <div><label className={LABEL}>Costo del flete (opcional)</label><input type="number" min={0} step="0.01" value={form.shipment?.freight_cost ?? ''} onChange={(e) => setShip({ freight_cost: e.target.value === '' ? null : Number(e.target.value) })} className={INPUT} /></div>
-                </>
-              )}
-              <div><label className={LABEL}>{isAgency ? 'Despacho programado' : 'Fecha prevista de recojo'}</label><input type="date" value={form.shipment?.scheduled_dispatch_date ?? ''} onChange={(e) => setShip({ scheduled_dispatch_date: e.target.value })} className={INPUT} /></div>
             </div>
-            {carrier && form.shipment?.scheduled_dispatch_date && carrier.dispatch_days && (() => {
-              const dow = new Date(`${form.shipment!.scheduled_dispatch_date}T12:00:00`).getDay()
-              return carrier.dispatch_days.split(',').map((d) => d.trim()).includes(String(dow)) ? null : (
-                <p className="text-xs text-amber-700 flex items-center gap-1"><AlertTriangle size={13} /> {carrier.name} no despacha ese día de la semana (solo es un aviso).</p>
-              )
-            })()}
+            {/* La guía, el flete y el despacho programado ya no se piden al armar el pedido: se registran después (Datos de envío / Shalom). */}
           </section>
 
           {neg && (

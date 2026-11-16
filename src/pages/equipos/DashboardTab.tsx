@@ -70,8 +70,7 @@ export default function DashboardTab() {
         {money_ && <Kpi label="Vendido" value={money(d.sales_total)} />}
         {money_ && <Kpi label="Cobrado en el mes" value={money(d.collected)} tone="emerald" />}
         {money_ && <Kpi label="Por cobrar (total)" value={money(d.receivable)} tone={d.receivable > 0 ? 'red' : 'slate'} />}
-        <Kpi label="Listos para despachar" value={d.ready_to_dispatch} tone="emerald" hint={`${d.waiting_dispatch} esperando validación o datos`} />
-        <Kpi label="Por validar" value={d.pending_validation} tone={d.pending_validation > 0 ? 'amber' : 'slate'} hint={d.observed ? `${d.observed} observados` : undefined} />
+        <Kpi label="Listos para despachar" value={d.ready_to_dispatch} tone="emerald" />
         <Kpi label="En tránsito" value={d.in_transit} hint={d.in_transit_follow_up ? `${d.in_transit_follow_up} con seguimiento pendiente` : undefined} tone={d.in_transit_follow_up ? 'amber' : 'slate'} />
         <Kpi label="En agencia" value={d.in_agency} hint={`${d.agency_yellow} amarillo · ${d.agency_red} rojo · ${d.agency_expired} vencidos`} tone={d.agency_expired + d.agency_red > 0 ? 'red' : 'slate'} />
         <Kpi label="Retornos abiertos" value={d.open_returns} tone={d.open_returns ? 'amber' : 'slate'} />

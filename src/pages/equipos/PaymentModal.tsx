@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { ImagePlus, X } from 'lucide-react'
 import { toast } from 'sonner'
 import Modal from '@/components/ui/Modal'
 import {
@@ -29,7 +30,11 @@ export default function PaymentModal({ open, onClose, onSaved, customerId, custo
   const [paidAt, setPaidAt] = useState(todayISO())
   const [method, setMethod] = useState<PaymentMethod>('yape')
   const [moment, setMoment] = useState<'anticipado' | 'al_recoger'>('anticipado')
-  const [reference, setReference] = useState('')
+  const [voucher, setVoucher] = useState<File | null>(null)
+  const [voucherUrl, setVoucherUrl] = useState<string | null>(null)
+  const fileRef = useRef<HTMLInputElement | null>(null)
+  // Si el usuario edita a mano cuánto aplicar a un pedido, el reparto automático deja de pisarlo.
+  const [touched, setTouched] = useState(false)
   const [invoice, setInvoice] = useState('')
   const [notes, setNotes] = useState('')
   const [apply, setApply] = useState<Record<number, string>>({})
@@ -39,29 +44,46 @@ export default function PaymentModal({ open, onClose, onSaved, customerId, custo
   useEffect(() => {
     if (!open) return
     setAmount(suggestedAmount ? String(suggestedAmount) : '')
-    setPaidAt(todayISO()); setMethod('yape'); setMoment('anticipado'); setReference(''); setInvoice(''); setNotes(''); setApply({})
+    setPaidAt(todayISO()); setMethod('yape'); setMoment('anticipado'); setVoucher(null); setInvoice(''); setNotes(''); setApply({}); setTouched(false)
     if (customerId) {
       equiposOrders.openBalances(customerId).then((rows) => {
         setBalances(rows)
-        if (orderId && suggestedAmount) setApply({ [orderId]: String(suggestedAmount) })
       }).catch((e) => toast.error(apiError(e, 'No se pudieron cargar los saldos del cliente')))
     } else setBalances([])
   }, [open, customerId, orderId, suggestedAmount])
+
+  useEffect(() => {
+    if (!voucher || !voucher.type.startsWith('image/')) { setVoucherUrl(null); return }
+    const u = URL.createObjectURL(voucher)
+    setVoucherUrl(u)
+    return () => URL.revokeObjectURL(u)
+  }, [voucher])
 
   const total = Number(amount) || 0
   const applied = useMemo(() => Object.values(apply).reduce((s, v) => s + (Number(v) || 0), 0), [apply])
   const rest = Math.round((total - applied) * 100) / 100
 
-  const autoFill = () => {
+  // Reparto por defecto: al escribir el monto, se aplica solo a los pedidos con saldo (primero el pedido desde el que se
+  // abrió el cobro, luego los demás del más antiguo al más nuevo) hasta agotarlo. Lo que sobre queda como saldo a favor.
+  useEffect(() => {
+    if (touched) return
     let left = total
     const next: Record<number, string> = {}
-    for (const o of [...balances].sort((a, b) => a.order_number - b.order_number)) {
+    const ordered = [...balances].sort((a, b) => (a.id === orderId ? -1 : b.id === orderId ? 1 : a.order_number - b.order_number))
+    for (const o of ordered) {
       if (left <= 0) break
       const take = Math.min(left, o.balance_amount)
-      next[o.id] = take.toFixed(2)
+      if (take > 0) next[o.id] = take.toFixed(2)
       left = Math.round((left - take) * 100) / 100
     }
     setApply(next)
+  }, [total, balances, orderId, touched])
+
+  const pickVoucher = (f: File | null) => {
+    if (!f) return setVoucher(null)
+    if (!/^(image\/(jpeg|png|webp)|application\/pdf)$/.test(f.type)) { toast.error('El voucher debe ser una imagen (jpg, png, webp) o un PDF'); return }
+    if (f.size > 5 * 1024 * 1024) { toast.error('El voucher no puede pesar más de 5 MB'); return }
+    setVoucher(f)
   }
 
   const save = async () => {
@@ -75,13 +97,21 @@ export default function PaymentModal({ open, onClose, onSaved, customerId, custo
       if (b && a.amount > b.balance_amount + 0.005) return toast.error(`Pedido ${b.order_number}: solo debe ${money(b.balance_amount)}`)
     }
     const body: PaymentInput = {
-      customer_id: customerId, amount: total, paid_at: paidAt, method, moment, reference: reference.trim(),
+      customer_id: customerId, amount: total, paid_at: todayISO(), method, moment, reference: '',
       invoice: invoice.trim().toUpperCase(), notes: notes.trim(), allocations, auto_allocate: false,
     }
     if (!(await confirm({ title: 'Registrar cobro', message: `Se registrará un cobro de ${money(total)} (${METHOD_LABEL[method]}) a nombre de ${customerName}${applied > 0 ? `, aplicado ${money(applied)} a sus pedidos` : ''}.`, confirmLabel: 'Registrar cobro' }))) return
     setSaving(true)
     try {
-      await equiposOrders.createPayment(body)
+      const created = await equiposOrders.createPayment(body)
+      if (voucher) {
+        try {
+          await equiposOrders.uploadVoucher(created.id, voucher)
+        } catch (e) {
+          // El cobro ya quedó registrado: el voucher se puede adjuntar después desde el detalle del pedido.
+          toast.warning(apiError(e, 'El cobro se registró, pero no se pudo subir el voucher. Adjúntalo desde el detalle del pedido.'), { duration: 9000 })
+        }
+      }
       toast.success(rest > 0.005 ? `Cobro registrado. ${money(rest)} quedan como saldo a favor` : 'Cobro registrado')
       onSaved()
       onClose()
@@ -98,7 +128,7 @@ export default function PaymentModal({ open, onClose, onSaved, customerId, custo
         <p className="text-sm text-slate-600">Cliente: <span className="font-semibold text-slate-800">{customerName || '—'}</span></p>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           <div><label className={LABEL}>Monto cobrado *</label><input type="number" min={0} step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} className={INPUT} /></div>
-          <div><label className={LABEL}>Fecha del cobro</label><input type="date" max={todayISO()} value={paidAt} onChange={(e) => setPaidAt(e.target.value)} className={INPUT} /></div>
+          <div><label className={LABEL}>Fecha del cobro</label><input type="date" value={paidAt} disabled readOnly title="El cobro se registra con la fecha de hoy" className={INPUT + ' bg-slate-50 text-slate-500'} /></div>
           <div>
             <label className={LABEL}>Medio</label>
             <select value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)} className={INPUT}>
@@ -112,7 +142,19 @@ export default function PaymentModal({ open, onClose, onSaved, customerId, custo
               <option value="al_recoger">Al recoger</option>
             </select>
           </div>
-          <div><label className={LABEL}>N° de operación</label><input value={reference} onChange={(e) => setReference(e.target.value)} className={INPUT} /></div>
+          <div>
+            <label className={LABEL}>Voucher del pago</label>
+            <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="hidden" onChange={(e) => { pickVoucher(e.target.files?.[0] ?? null); e.target.value = '' }} />
+            {voucher ? (
+              <div className="flex items-center gap-2 rounded-lg border border-slate-300 px-2 py-1">
+                {voucherUrl ? <img src={voucherUrl} alt="Vista previa del voucher" className="h-8 w-8 rounded object-cover" /> : <span className="text-[11px] font-semibold text-slate-500">PDF</span>}
+                <span className="flex-1 truncate text-xs text-slate-600" title={voucher.name}>{voucher.name}</span>
+                <button type="button" aria-label="Quitar voucher" onClick={() => setVoucher(null)} className="text-slate-400 hover:text-red-600"><X size={14} /></button>
+              </div>
+            ) : (
+              <button type="button" onClick={() => fileRef.current?.click()} className={BTN_SECONDARY + ' w-full justify-center'}><ImagePlus size={14} /> Subir imagen</button>
+            )}
+          </div>
           <div><label className={LABEL}>Comprobante emitido</label><input value={invoice} onChange={(e) => setInvoice(e.target.value)} placeholder="F002-59" className={INPUT} /></div>
         </div>
         <div><label className={LABEL}>Notas</label><input value={notes} onChange={(e) => setNotes(e.target.value)} className={INPUT} /></div>
@@ -120,7 +162,6 @@ export default function PaymentModal({ open, onClose, onSaved, customerId, custo
         <div>
           <div className="flex items-center justify-between mb-1">
             <label className={LABEL + ' !mb-0'}>Aplicar a pedidos con saldo</label>
-            <button type="button" className={BTN_SECONDARY} onClick={autoFill} disabled={!total}>Aplicar al más antiguo primero</button>
           </div>
           {balances.length === 0 ? (
             <p className="text-sm text-slate-400 border border-dashed border-slate-200 rounded-lg p-3">El cliente no tiene pedidos con saldo; el cobro quedará como saldo a favor.</p>
@@ -132,7 +173,7 @@ export default function PaymentModal({ open, onClose, onSaved, customerId, custo
                   <span className="text-slate-500 flex-1">Saldo {money(o.balance_amount)} de {money(o.total_amount)}</span>
                   <input
                     type="number" min={0} step="0.01" max={o.balance_amount} placeholder="0.00" aria-label={`Aplicar al pedido ${o.order_number}`}
-                    value={apply[o.id] ?? ''} onChange={(e) => setApply((a) => ({ ...a, [o.id]: e.target.value }))}
+                    value={apply[o.id] ?? ''} onChange={(e) => { setTouched(true); setApply((a) => ({ ...a, [o.id]: e.target.value })) }}
                     className="w-28 border border-slate-300 rounded-lg px-2 py-1 text-right"
                   />
                 </div>

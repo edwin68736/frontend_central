@@ -19,7 +19,9 @@ export interface EquipReturnView {
   items_text: string
   unpaid_balance: number
   return_cost: number
-  status: 'solicitado' | 'en_camino' | 'recibido' | 'desechado_por_agencia'
+  status: 'solicitado' | 'en_camino' | 'recibido' | 'desechado_por_agencia' | 'anulado'
+  cancelled_at?: string | null
+  cancel_reason?: string
   condition: 'buen_estado' | 'danado'
   action_taken: string
   notes: string
@@ -27,7 +29,7 @@ export interface EquipReturnView {
 }
 
 export const RETURN_STATUS_LABEL: Record<string, string> = {
-  solicitado: 'Solicitado', en_camino: 'En camino', recibido: 'Recibido', desechado_por_agencia: 'Desechado por la agencia',
+  solicitado: 'Solicitado', en_camino: 'En camino', recibido: 'Recibido', desechado_por_agencia: 'Desechado por la agencia', anulado: 'Anulado',
 }
 export const CONDITION_LABEL: Record<string, string> = { buen_estado: 'Buen estado', danado: 'Dañado' }
 
@@ -135,6 +137,8 @@ export const equiposControl = {
   listReturns: (status?: string) => api.get<{ data: EquipReturnView[] }>(`${base}/returns`, { params: { status } }).then((r) => r.data.data ?? []),
   createReturn: (b: ReturnInput, pin?: string) => api.post<{ data: EquipReturnView }>(`${base}/returns`, b, pin ? { headers: { 'X-Security-Pin': pin } } : undefined).then((r) => r.data.data),
   updateReturn: (id: number, b: ReturnUpdate) => api.put<{ data: EquipReturnView }>(`${base}/returns/${id}`, b).then((r) => r.data.data),
+  cancelReturn: (id: number, reason: string, pin?: string) =>
+    api.post<{ data: EquipReturnView }>(`${base}/returns/${id}/cancel`, { reason }, pin ? { headers: { 'X-Security-Pin': pin } } : undefined).then((r) => r.data.data),
   reship: (id: number) => api.post<{ data: OrderView }>(`${base}/returns/${id}/reship`).then((r) => r.data.data),
 
   dashboard: (period?: string) =>

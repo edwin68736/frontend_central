@@ -76,6 +76,8 @@ export interface OrderInput {
   customer_name: string
   customer_doc_type: string
   customer_doc_number: string
+  /** Tipo del documento de quien recoge (DNI por defecto o CE). */
+  contact_doc_type: string
   contact_dni: string
   contact_name: string
   customer_phone: string
@@ -111,6 +113,8 @@ export interface PaymentLine {
   payment_total: number
   status: string
   notes: string
+  /** No vacío = el cobro tiene voucher adjunto. */
+  voucher_mime: string
 }
 
 export interface TimelineEvent {
@@ -176,6 +180,7 @@ export interface OrderView {
   customer_name: string
   customer_doc_type: string
   customer_doc_number: string
+  contact_doc_type: string
   contact_dni: string
   contact_name: string
   created_by: number | null
@@ -222,11 +227,13 @@ export interface OrderRow {
   freight_cost: number
   scheduled_dispatch_date: string | null
   destination_agency: string
+  delivery_mode: string
   arrived_at: string | null
   days_in_agency: number | null
   days_left: number | null
   agency_level: 'verde' | 'amarillo' | 'rojo' | 'critico' | 'sin_fecha' | ''
   agency_label: string
+  customer_id: number | null
 }
 
 export interface OrderListResult {
@@ -294,6 +301,7 @@ export interface PaymentView {
   unallocated_amount: number
   status: string
   notes: string
+  voucher_mime: string
   allocations: { order_id: number; order_number: number; amount: number }[]
 }
 
@@ -402,6 +410,16 @@ export const equiposOrders = {
 
   listPayments: (params: { customer_id?: number; from?: string; to?: string; method?: string; status?: string; q?: string; page?: number; per_page?: number }) =>
     api.get<{ data: PaymentListResult }>(`${base}/payments`, { params }).then((r) => ({ ...r.data.data, rows: r.data.data.rows ?? [] })),
+  /** Planes vigentes de Tukifac (para el ítem «Plan Tukifac»). */
+  listPlans: () => api.get<{ data: { id: number; name: string; price: number }[] }>(`${base}/plans`).then((r) => r.data.data ?? []),
+  /** Adjunta (o reemplaza) el voucher de un cobro: imagen jpg/png/webp o PDF de hasta 5 MB. */
+  uploadVoucher: (paymentId: number, file: File) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    return api.post<{ data: PaymentView }>(`${base}/payments/${paymentId}/voucher`, fd, { headers: { 'Content-Type': 'multipart/form-data' } }).then((r) => r.data.data)
+  },
+  /** Descarga el voucher (requiere sesión): devuelve un blob para mostrarlo o abrirlo. */
+  fetchVoucher: (paymentId: number) => api.get<Blob>(`${base}/payments/${paymentId}/voucher`, { responseType: 'blob' }).then((r) => r.data),
   createPayment: (body: PaymentInput) => api.post<{ data: PaymentView }>(`${base}/payments`, body).then((r) => r.data.data),
   voidPayment: (id: number, reason: string, pin?: string) => api.post<{ data: PaymentView }>(`${base}/payments/${id}/void`, { reason }, pinHeader(pin)).then((r) => r.data.data),
   allocatePayment: (id: number, allocations: { order_id: number; amount: number }[]) =>

@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { AlertTriangle, Ban, Banknote, CheckCircle2, ExternalLink, MessageCircle, Pencil, Printer, RefreshCw, RotateCcw, Truck } from 'lucide-react'
+import { Ban, Banknote, CheckCircle2, Copy, ExternalLink, FileImage, MessageCircle, Paperclip, Pencil, Printer, RefreshCw, RotateCcw, Truck } from 'lucide-react'
 import Modal from '@/components/ui/Modal'
 import Spinner from '@/components/ui/Spinner'
 import { useAuth } from '@/contexts/AuthContext'
@@ -8,14 +8,14 @@ import {
   DELIVERY_MODE_LABEL, equiposOrders, METHOD_LABEL, negativeStockItems, SALE_TYPE_LABEL, type OrderView,
 } from '@/services/equiposOrders.service'
 import { apiError, BTN_PRIMARY, BTN_SECONDARY, formatDateTime, INPUT } from './common'
-import { fmtDate, money, PaymentBadge, ShipmentBadge, StatusBadge, UserBadge, ValidationBadge } from './ordersCommon'
+import { fmtDate, money, PaymentBadge, ShipmentBadge, StatusBadge, UserBadge } from './ordersCommon'
 import { equiposProvider, type ShipmentEvent, type TariffQuote } from '@/services/equiposProvider.service'
 import { buildShippingLabel, openLabel } from './shippingLabel'
 import { useConfirm, type ConfirmOptions, type ConfirmResult } from './ConfirmProvider'
 import PaymentModal from './PaymentModal'
 import ShipmentDateModal from './ShipmentDateModal'
 import ReturnModal from './ReturnModal'
-import { waLink, waText, WA_LABEL, type WaKind } from './whatsapp'
+import { waText, WA_LABEL, type WaKind } from './whatsapp'
 
 interface Props {
   orderId: number | null
@@ -78,6 +78,11 @@ export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Pro
   const [quoting, setQuoting] = useState(false)
   const [events, setEvents] = useState<ShipmentEvent[] | null>(null)
   const [eventsOpen, setEventsOpen] = useState(false)
+  // Mensajes de seguimiento: se muestran para copiar (ya no abren WhatsApp).
+  const [msg, setMsg] = useState<{ kind: WaKind; text: string } | null>(null)
+  const voucherInput = useRef<HTMLInputElement | null>(null)
+  const [voucherFor, setVoucherFor] = useState<number | null>(null)
+  const [voucherBusy, setVoucherBusy] = useState<number | null>(null)
 
   const can = (p: string) => hasPermission(p)
 
@@ -160,6 +165,49 @@ export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Pro
     if (!o || !sh) return
     void act(() => equiposOrders.updateShippingData(o.id, { guide_number: sh.guide_number ?? '', freight_cost: amount, scheduled_dispatch_date: (sh.scheduled_dispatch_date ?? '').slice(0, 10) }), 'Flete actualizado')
   }
+  const copyMessage = async () => {
+    if (!msg) return
+    try {
+      await navigator.clipboard.writeText(msg.text)
+      toast.success('Mensaje copiado')
+    } catch {
+      // Sin permiso de portapapeles (p. ej. HTTP): se selecciona el texto para copiarlo a mano.
+      const ta = document.getElementById('equip-msg-text') as HTMLTextAreaElement | null
+      ta?.focus(); ta?.select()
+      toast.info('Selecciona el texto y cópialo con Ctrl+C')
+    }
+  }
+  const openVoucher = async (paymentId: number) => {
+    setVoucherBusy(paymentId)
+    try {
+      const blob = await equiposOrders.fetchVoucher(paymentId)
+      const url = URL.createObjectURL(blob)
+      if (!window.open(url, '_blank')) toast.error('El navegador bloqueó la ventana del voucher; permite las ventanas emergentes')
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    } catch (e) {
+      toast.error(apiError(e, 'No se pudo abrir el voucher'))
+    } finally {
+      setVoucherBusy(null)
+    }
+  }
+  const attachVoucher = async (file: File | null) => {
+    const id = voucherFor
+    setVoucherFor(null)
+    if (!file || !id) return
+    if (!/^(image\/(jpeg|png|webp)|application\/pdf)$/.test(file.type)) return void toast.error('El voucher debe ser una imagen (jpg, png, webp) o un PDF')
+    if (file.size > 5 * 1024 * 1024) return void toast.error('El voucher no puede pesar más de 5 MB')
+    setVoucherBusy(id)
+    try {
+      await equiposOrders.uploadVoucher(id, file)
+      toast.success('Voucher adjuntado')
+      void load(); onChanged()
+    } catch (e) {
+      toast.error(apiError(e, 'No se pudo subir el voucher'))
+    } finally {
+      setVoucherBusy(null)
+    }
+  }
+  const isOffice = sh?.delivery_mode === 'oficina' || sh?.delivery_mode === 'pendiente_recojo'
   const waKinds: WaKind[] = !o || !sh ? [] : [
     ...(sh.status === 'en_transito' ? (['despachado'] as WaKind[]) : []),
     ...(sh.status === 'en_agencia' ? (['llego', 'recordatorio', 'vence_pronto'] as WaKind[]) : []),
@@ -177,16 +225,11 @@ export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Pro
           <div className="space-y-5">
             <div className="flex flex-wrap items-center gap-2">
               <StatusBadge value={o.status} />
-              <ValidationBadge value={o.validation_status} />
               <PaymentBadge value={o.payment_status} />
               {sh && <ShipmentBadge value={sh.status} />}
               <UserBadge id={o.created_by} name={o.created_by_name} />
               <span className="text-xs text-slate-500 ml-auto">{SALE_TYPE_LABEL[o.sale_type]} · {fmtDate(o.order_date)}</span>
             </div>
-
-            {o.validation_status === 'observado' && o.validation_notes && (
-              <div className="flex gap-2 text-sm bg-red-50 border border-red-200 text-red-800 rounded-lg p-3"><AlertTriangle size={16} className="mt-0.5 shrink-0" /> Observado: {o.validation_notes}</div>
-            )}
 
             <div className="grid sm:grid-cols-2 gap-4">
               <section className="border border-slate-200 rounded-lg p-3 text-sm space-y-0.5">
@@ -194,7 +237,7 @@ export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Pro
                 <p className="font-semibold text-slate-800">{o.customer_name}</p>
                 <p className="text-slate-600">{o.customer_doc_type} {o.customer_doc_number}</p>
                 {o.customer_phone && <p className="text-slate-600">Cel. {o.customer_phone}</p>}
-                {(o.contact_dni || o.contact_name) && <p className="text-slate-600">Recoge: {o.contact_name}{o.contact_dni ? ` · DNI ${o.contact_dni}` : ""}</p>}
+                {(o.contact_dni || o.contact_name) && <p className="text-slate-600">Recoge: {o.contact_name}{o.contact_dni ? ` · ${o.contact_doc_type === 'CE' ? 'C.E.' : 'DNI'} ${o.contact_dni}` : ''}</p>}
                 {o.billing_doc_type !== 'ninguno' && <p className="text-slate-600">Comprobante: {o.billing_doc_type}</p>}
                 {o.notes && <p className="text-slate-500 italic">{o.notes}</p>}
               </section>
@@ -342,6 +385,11 @@ export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Pro
                         <span>{fmtDate(p.paid_at)}</span><span className="font-medium">{money(p.amount)}</span>
                         <span>{METHOD_LABEL[p.method] ?? p.method} · {p.moment === 'al_recoger' ? 'al recoger' : 'anticipado'}</span>
                         {p.reference && <span>Op. {p.reference}</span>}{p.invoice && <span>{p.invoice}</span>}
+                        {p.voucher_mime ? (
+                          <button type="button" disabled={voucherBusy === p.payment_id} onClick={() => void openVoucher(p.payment_id)} className="inline-flex items-center gap-1 text-indigo-600 hover:underline no-underline"><FileImage size={13} /> Ver voucher</button>
+                        ) : can('equipos.payments') && p.status === 'vigente' ? (
+                          <button type="button" disabled={voucherBusy === p.payment_id} onClick={() => { setVoucherFor(p.payment_id); voucherInput.current?.click() }} className="inline-flex items-center gap-1 text-slate-500 hover:text-indigo-600"><Paperclip size={13} /> Adjuntar voucher</button>
+                        ) : null}
                         {p.payment_total !== p.amount && <span className="text-slate-400">de un cobro de {money(p.payment_total)}</span>}
                       </li>
                     ))}
@@ -369,25 +417,15 @@ export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Pro
               {o.status === 'borrador' && can('equipos.create') && (
                 <button type="button" className={BTN_PRIMARY} disabled={busy} onClick={() => void guard({ title: 'Confirmar pedido', message: `Se confirmará el pedido N° ${o.order_number} por ${money(o.total_amount)} y se descontará el stock.`, confirmLabel: 'Confirmar pedido' }, () => equiposOrders.confirmOrder(o.id), 'Pedido confirmado')}><CheckCircle2 size={15} /> Confirmar pedido</button>
               )}
-              {o.status === 'registrado' && can('equipos.validate') && o.validation_status !== 'validado' && (
-                <button type="button" className={BTN_PRIMARY} disabled={busy} onClick={() => void guard({ title: 'Validar pedido', message: 'Confirmas que los datos del cliente, los productos y el destino están correctos. Después podrá despacharse.', confirmLabel: 'Validar' }, () => equiposOrders.validateOrder(o.id), 'Pedido validado')}><CheckCircle2 size={15} /> Validar datos</button>
-              )}
-              {o.status === 'registrado' && can('equipos.validate') && (
-                <button type="button" className={BTN_SECONDARY} disabled={busy} onClick={() => void guard({ title: 'Observar pedido', input: { label: '¿Qué hay que corregir?', required: true }, confirmLabel: 'Observar' }, (r) => equiposOrders.observeOrder(o.id, r.text), 'Pedido observado')}>Observar</button>
-              )}
               {o.status === 'registrado' && sh?.status === 'pendiente_envio' && can('equipos.shipments') && (
-                <button type="button" className={BTN_PRIMARY} disabled={busy || o.validation_status !== 'validado'} title={o.validation_status !== 'validado' ? 'Primero valida los datos del pedido' : ''} onClick={() => setDateAction('dispatch')}><Truck size={15} /> Despachar</button>
+                <button type="button" className={BTN_PRIMARY} disabled={busy} onClick={() => setDateAction('dispatch')}><Truck size={15} /> Despachar</button>
               )}
               {sh?.status === 'en_transito' && can('equipos.shipments') && (
                 <button type="button" className={BTN_PRIMARY} disabled={busy} onClick={() => setDateAction('arrival')}>Marcar llegada a agencia</button>
               )}
-              {(sh?.status === 'en_agencia' || sh?.status === 'en_transito') && can('equipos.shipments') && (
+              {/* Solo para recojo en oficina: los envíos por agencia se cierran con el seguimiento de la agencia. */}
+              {isOffice && o.status === 'registrado' && (sh?.status === 'pendiente_envio' || sh?.status === 'en_transito') && can('equipos.shipments') && (
                 <button type="button" className={BTN_SECONDARY} disabled={busy} onClick={() => setDateAction('pickup')}>Cliente recogió</button>
-              )}
-              {o.status === 'registrado' && can('equipos.payments') && o.payment_status !== 'pagado' && (
-                <button type="button" className={BTN_SECONDARY} disabled={busy} onClick={() => void guard({ title: o.payment_status === 'no_pago' ? 'Quitar «sin pago»' : 'Marcar sin pago', message: 'Cambia si este pedido se cobra. Requiere tu PIN.', pin: true, confirmLabel: 'Confirmar' }, (r) => equiposOrders.setNoPayment(o.id, o.payment_status !== 'no_pago', r.pin), o.payment_status === 'no_pago' ? 'Marca de sin pago quitada' : 'Marcado sin pago (obsequio/cortesía)')}>
-                  {o.payment_status === 'no_pago' ? 'Quitar «sin pago»' : 'Marcar sin pago'}
-                </button>
               )}
               {sh && o.status === 'registrado' && can('equipos.shipments') && (
                 <span className="inline-flex items-center gap-1">
@@ -397,16 +435,32 @@ export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Pro
               {sh && (sh.status === 'en_transito' || sh.status === 'en_agencia') && o.status === 'registrado' && can('equipos.returns') && (
                 <button type="button" className={BTN_SECONDARY} onClick={() => setRetOpen(true)}><RotateCcw size={13} /> Registrar retorno</button>
               )}
-              {o.customer_phone && waKinds.map((k) => {
-                const link = waLink(o.customer_phone, waText(k, { customer: o.customer_name, orderNumber: o.order_number, carrier: sh?.carrier_name, guide: sh?.guide_number, guideLabel: sh?.guide_label, agency: sh?.destination_agency, deadline: sh?.pickup_deadline ? fmtDate(sh.pickup_deadline) : undefined, balance: o.balance_amount }))
-                return link ? <a key={k} href={link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100"><MessageCircle size={13} /> {WA_LABEL[k]}</a> : null
-              })}
+              {waKinds.map((k) => (
+                <button key={k} type="button" onClick={() => setMsg({ kind: k, text: waText(k, { customer: o.customer_name, orderNumber: o.order_number, carrier: sh?.carrier_name, guide: sh?.guide_number, guideLabel: sh?.guide_label, agency: sh?.destination_agency, deadline: sh?.pickup_deadline ? fmtDate(sh.pickup_deadline) : undefined, balance: o.balance_amount }) })}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100"><MessageCircle size={13} /> {WA_LABEL[k]}</button>
+              ))}
               {isOpen && can('equipos.cancel') && (
                 <button type="button" className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-red-700 bg-red-50 hover:bg-red-100" disabled={busy}
                   onClick={() => void guard({ title: 'Anular pedido', message: 'Se devolverá el stock descontado. No se puede deshacer.', danger: true, pin: true, input: { label: 'Motivo de la anulación', required: true }, confirmLabel: 'Anular pedido' }, (r) => equiposOrders.cancelOrder(o.id, r.text, r.pin), 'Pedido anulado')}>
                   <Ban size={13} /> Anular
                 </button>
               )}
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      <input ref={voucherInput} type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="hidden"
+        onChange={(e) => { void attachVoucher(e.target.files?.[0] ?? null); e.target.value = '' }} />
+
+      <Modal open={msg !== null} onClose={() => setMsg(null)} title={msg ? WA_LABEL[msg.kind] : ''} maxWidth="max-w-lg">
+        {msg && (
+          <div className="space-y-3">
+            {o?.customer_phone && <p className="text-xs text-slate-500">Celular del cliente: <span className="font-medium text-slate-700">{o.customer_phone}</span></p>}
+            <textarea id="equip-msg-text" readOnly value={msg.text} rows={7} className={INPUT + ' resize-none'} onFocus={(e) => e.currentTarget.select()} />
+            <div className="flex justify-end gap-2">
+              <button type="button" className={BTN_SECONDARY} onClick={() => setMsg(null)}>Cerrar</button>
+              <button type="button" className={BTN_PRIMARY} onClick={() => void copyMessage()}><Copy size={14} /> Copiar mensaje</button>
             </div>
           </div>
         )}

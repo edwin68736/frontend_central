@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { Download, Lock, Unlock } from 'lucide-react'
 import { writeXlsx, type CellValue } from 'hucre'
@@ -43,7 +43,11 @@ export default function ReportsTab() {
   const [profit, setProfit] = useState<ProfitReport | null>(null)
   const [closed, setClosed] = useState<ClosedPeriod[]>([])
   const confirm = useConfirm()
-  const linesP = usePaging(sales?.lines ?? [], 10)
+  // «Ventas por producto»: por defecto el más vendido (mayor cantidad) primero; también se puede ordenar por importe.
+  const [salesSort, setSalesSort] = useState<'cantidad' | 'importe'>('cantidad')
+  const sortedLines = useMemo(() => [...(sales?.lines ?? [])].sort((a, b) =>
+    salesSort === 'cantidad' ? b.quantity - a.quantity || b.amount - a.amount : b.amount - a.amount || b.quantity - a.quantity), [sales, salesSort])
+  const linesP = usePaging(sortedLines, 10)
   const unitsP = usePaging(sales?.units ?? [], 10)
   const debtP = usePaging(coll?.customers ?? [], 10)
   const repP = usePaging(rep ?? [], 10)
@@ -79,7 +83,7 @@ export default function ReportsTab() {
         ] }])
       } else if (section === 'ventas' && sales) {
         await saveSheets(`equipos-ventas-${period}.xlsx`, [
-          { name: 'Ventas', rows: [['Tipo', 'Código', 'Nombre', 'Cantidad', 'Importe'], ...sales.lines.map((l) => [l.kind, l.code, l.name, l.quantity, l.amount] as CellValue[])] },
+          { name: 'Ventas', rows: [['Tipo', 'Código', 'Nombre', 'Cantidad', 'Importe'], ...sortedLines.map((l) => [l.kind, l.code, l.name, l.quantity, l.amount] as CellValue[])] },
           { name: 'Unidades', rows: [['Código', 'Directo independiente', 'Directo Promo TK', 'Combo independiente', 'Combo Promo TK', 'Total'], ...sales.units.map((u) => [u.code, u.direct_independiente, u.direct_promo_tk, u.combo_independiente, u.combo_promo_tk, u.total] as CellValue[])] },
         ])
       } else if (section === 'cobranza' && coll) {
@@ -165,6 +169,14 @@ export default function ReportsTab() {
           )}
 
           {section === 'ventas' && sales && (
+            <div className="space-y-3">
+            <div className="flex items-center gap-2 text-sm text-slate-600">
+              <label htmlFor="equip-sales-sort">Ordenar por</label>
+              <select id="equip-sales-sort" value={salesSort} onChange={(e) => setSalesSort(e.target.value as 'cantidad' | 'importe')} className={SELECT}>
+                <option value="cantidad">Cantidad vendida (más vendido primero)</option>
+                <option value="importe">Importe vendido</option>
+              </select>
+            </div>
             <div className="grid xl:grid-cols-2 gap-4">
               <div className={TABLE}>
                 <p className="px-3 pt-3 text-sm font-semibold text-slate-800">Importe vendido</p>
@@ -172,7 +184,7 @@ export default function ReportsTab() {
                   <thead><tr className="border-b border-slate-200"><th className={TH}>Concepto</th><th className={TH + ' text-right'}>Cant.</th><th className={TH + ' text-right'}>Importe</th></tr></thead>
                   <tbody className="divide-y divide-slate-100">
                     {linesP.rows.map((l, i) => <tr key={i}><td className="px-3 py-1.5">{l.code || l.name}<span className="ml-2 text-xs text-slate-400">{l.kind}</span></td><td className="px-3 text-right">{l.quantity}</td><td className="px-3 text-right">{money(l.amount)}</td></tr>)}
-                    {sales.lines.length === 0 && <tr><td colSpan={3} className="px-3 py-6 text-center text-slate-400">Sin ventas en el mes.</td></tr>}
+                    {sortedLines.length === 0 && <tr><td colSpan={3} className="px-3 py-6 text-center text-slate-400">Sin ventas en el mes.</td></tr>}
                   </tbody>
                 </table>
                 <PaginationBar {...linesP.barProps} itemLabel="conceptos" />
@@ -187,6 +199,7 @@ export default function ReportsTab() {
                 </table>
                 <PaginationBar {...unitsP.barProps} itemLabel="productos" />
               </div>
+            </div>
             </div>
           )}
 

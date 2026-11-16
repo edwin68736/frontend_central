@@ -13,7 +13,7 @@ import { useConfirm } from './ConfirmProvider'
 import { useDebounced, usePaging } from './hooks'
 import { printLabelsFor } from './printLabels'
 import OrderEditor from './OrderEditor'
-import { AlertBadge, fmtDate, money, PaymentBadge, ValidationBadge } from './ordersCommon'
+import { AlertBadge, fmtDate, money, PaymentBadge } from './ordersCommon'
 
 const FILTERS = [
   { key: 'pendiente_envio', label: 'Por despachar' },
@@ -109,7 +109,7 @@ export default function ShipmentsTab() {
       </div>
 
       {status === 'pendiente_envio' && !loading && (
-        <p className="text-sm text-slate-500">{rows.length} por despachar · <span className="text-emerald-700 font-medium">{readyCount} listos</span> (validados) · {rows.length - readyCount} esperando validación o datos.</p>
+        <p className="text-sm text-slate-500">{rows.length} por despachar · <span className="text-emerald-700 font-medium">{readyCount} listos</span> para despachar.</p>
       )}
 
       {loading && rows.length === 0 ? <div className="flex justify-center py-16"><Spinner /></div> : (
@@ -138,7 +138,6 @@ export default function ShipmentsTab() {
                 </p>
               )}
               <div className="flex flex-wrap items-center gap-2 text-xs">
-                <ValidationBadge value={r.validation_status} />
                 {canSeeMoney && <PaymentBadge value={r.payment_status} />}
                 {canSeeMoney && r.balance_amount > 0 && <span className="text-red-700 font-medium">Saldo {money(r.balance_amount)}</span>}
                 {r.status === 'pendiente_envio' && <span className="text-slate-500">Programado {fmtDate(r.scheduled_dispatch_date)}</span>}
@@ -149,7 +148,7 @@ export default function ShipmentsTab() {
                 <div className="flex flex-wrap gap-2 pt-1">
                   {r.status === 'pendiente_envio' && (
                     <button type="button" className={BTN_PRIMARY + ' !py-1.5 !text-xs'} disabled={busy === r.order_id || !r.ready_to_dispatch}
-                      title={r.ready_to_dispatch ? '' : 'Falta validar el pedido'} onClick={() => void confirmRun('Despachar pedido', `El pedido N° ${r.order_number} de ${r.customer_name} saldrá por ${r.carrier_name || 'el transportista'}.`, 'Despachar', r.order_id, () => equiposOrders.dispatch(r.order_id), 'Pedido despachado')}>
+                      onClick={() => void confirmRun('Despachar pedido', `El pedido N° ${r.order_number} de ${r.customer_name} saldrá por ${r.carrier_name || 'el transportista'}.`, 'Despachar', r.order_id, () => equiposOrders.dispatch(r.order_id), 'Pedido despachado')}>
                       <Truck size={13} /> Despachar
                     </button>
                   )}

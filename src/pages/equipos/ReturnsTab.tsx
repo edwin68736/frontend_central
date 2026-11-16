@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { RotateCcw } from 'lucide-react'
+import { Ban, RotateCcw } from 'lucide-react'
 import Modal from '@/components/ui/Modal'
 import Spinner from '@/components/ui/Spinner'
 import PaginationBar from '@/components/ui/PaginationBar'
@@ -18,12 +18,15 @@ const FILTERS = [
 const STYLE: Record<string, string> = {
   solicitado: 'bg-amber-50 text-amber-700 border-amber-200', en_camino: 'bg-sky-50 text-sky-700 border-sky-200',
   recibido: 'bg-emerald-50 text-emerald-700 border-emerald-200', desechado_por_agencia: 'bg-red-50 text-red-700 border-red-200',
+  anulado: 'bg-slate-100 text-slate-500 border-slate-200',
 }
 
 /** Retornos: paquetes no recogidos que vuelven. Recibidos en buen estado reingresan al stock; los dañados solo se registran. */
 export default function ReturnsTab() {
   const { hasPermission } = useAuth()
   const can = hasPermission('equipos.returns')
+  // Anular un retorno es una acción aparte (permiso propio): se asigna al rol de quien lo puede revertir.
+  const canCancel = hasPermission('equipos.returns_cancel')
   const [filter, setFilter] = useState('abiertos')
   const [rows, setRows] = useState<EquipReturnView[]>([])
   const [loading, setLoading] = useState(true)
@@ -74,6 +77,24 @@ export default function ReturnsTab() {
     }
   }
 
+  const cancelReturn = async (r: EquipReturnView) => {
+    const res = await confirm({
+      title: `Anular retorno N° ${r.return_number}`,
+      message: r.status === 'recibido' && r.condition === 'buen_estado'
+        ? `Este retorno ya se recibió: se descontará otra vez del stock lo que reingresó (${r.items_text}) y el envío del pedido volverá a su estado anterior.`
+        : 'El retorno quedará anulado y el envío del pedido volverá a su estado anterior. No se puede deshacer.',
+      danger: true, pin: true, input: { label: 'Motivo de la anulación', required: true }, confirmLabel: 'Anular retorno',
+    })
+    if (!res) return
+    try {
+      await equiposControl.cancelReturn(r.id, res.text, res.pin)
+      toast.success('Retorno anulado')
+      void load()
+    } catch (e) {
+      toast.error(apiError(e, 'No se pudo anular el retorno'))
+    }
+  }
+
   const reship = async (r: EquipReturnView) => {
     if (!(await confirm({ title: 'Reenviar pedido', message: `Se creará un nuevo envío para el pedido N° ${r.order_number} y se descontará otra vez el stock de ${r.items_text}.`, confirmLabel: 'Reenviar' }))) return
     try {
@@ -108,11 +129,14 @@ export default function ReturnsTab() {
                   <td className="px-3 whitespace-nowrap">{fmtDate(r.requested_at)}</td>
                   <td className="px-3 text-right">{money(r.unpaid_balance)}</td>
                   <td className="px-3 text-right">{money(r.return_cost)}</td>
-                  <td className="px-3"><span className={`text-xs rounded-full border px-2 py-0.5 whitespace-nowrap ${STYLE[r.status]}`}>{RETURN_STATUS_LABEL[r.status]}</span>{r.reshipped && <span className="block text-xs text-indigo-600">reenviado</span>}</td>
+                  <td className="px-3"><span className={`text-xs rounded-full border px-2 py-0.5 whitespace-nowrap ${STYLE[r.status]}`}>{RETURN_STATUS_LABEL[r.status]}</span>{r.reshipped && <span className="block text-xs text-indigo-600">reenviado</span>}{r.status === 'anulado' && r.cancel_reason && <span className="block max-w-40 truncate text-xs text-slate-400" title={r.cancel_reason}>{r.cancel_reason}</span>}</td>
                   <td className="px-3 text-right whitespace-nowrap">
-                    {can && <button type="button" className={BTN_SECONDARY} onClick={() => open(r)}>Gestionar</button>}
+                    {can && r.status !== 'anulado' && <button type="button" className={BTN_SECONDARY} onClick={() => open(r)}>Gestionar</button>}
                     {can && r.status === 'recibido' && r.condition === 'buen_estado' && !r.reshipped && r.order_id && (
                       <button type="button" className={BTN_SECONDARY + ' ml-1'} onClick={() => void reship(r)}><RotateCcw size={12} /> Reenviar</button>
+                    )}
+                    {canCancel && r.status !== 'anulado' && !r.reshipped && (
+                      <button type="button" className="ml-1 inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium text-red-700 bg-red-50 hover:bg-red-100" onClick={() => void cancelReturn(r)}><Ban size={12} /> Anular</button>
                     )}
                   </td>
                 </tr>
@@ -133,7 +157,7 @@ export default function ReturnsTab() {
               <div>
                 <label className={LABEL}>Estado</label>
                 <select value={f.status} disabled={closed} onChange={(e) => setF({ ...f, status: e.target.value })} className={INPUT}>
-                  {Object.entries(RETURN_STATUS_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                  {Object.entries(RETURN_STATUS_LABEL).filter(([k]) => k !== 'anulado').map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                 </select>
               </div>
               <div>
