@@ -403,6 +403,9 @@ export const equiposOrders = {
   updateShipment: (orderId: number, body: ShipmentInput) => api.put<OrderResponse>(`${base}/orders/${orderId}/shipment`, body).then(unwrap),
   dispatch: (orderId: number, date?: string) => api.post<OrderResponse>(`${base}/orders/${orderId}/dispatch`, { date }).then(unwrap),
   arrived: (orderId: number, date?: string) => api.post<OrderResponse>(`${base}/orders/${orderId}/arrived`, { date }).then(unwrap),
+  /** Deshace un «Cliente recogió» marcado por error (motivo y PIN): el envío vuelve a su estado anterior. */
+  undoPickup: (orderId: number, reason: string, pin?: string) =>
+    api.post<OrderResponse>(`${base}/orders/${orderId}/undo-pickup`, { reason }, pinHeader(pin)).then(unwrap),
   pickedUp: (orderId: number, date?: string) => api.post<OrderResponse>(`${base}/orders/${orderId}/picked-up`, { date }).then(unwrap),
   updateShippingData: (orderId: number, body: { guide_number: string; freight_cost: number; scheduled_dispatch_date: string }) =>
     api.patch<OrderResponse>(`${base}/orders/${orderId}/shipping-data`, body).then(unwrap),

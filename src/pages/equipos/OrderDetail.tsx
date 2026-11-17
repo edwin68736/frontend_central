@@ -423,6 +423,13 @@ export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Pro
               {sh?.status === 'en_transito' && can('equipos.shipments') && (
                 <button type="button" className={BTN_PRIMARY} disabled={busy} onClick={() => setDateAction('arrival')}>Marcar llegada a agencia</button>
               )}
+              {/* Recojo marcado por error (a mano o por Shalom): se deshace para poder registrar el retorno o corregirlo. */}
+              {sh?.status === 'entregado' && o.status === 'registrado' && can('equipos.shipments') && (
+                <button type="button" className={BTN_SECONDARY} disabled={busy}
+                  onClick={() => void guard({ title: 'Deshacer recojo', message: 'El envío vuelve al estado que tenía antes de marcarse como recogido (en agencia o en tránsito) y se borra la fecha de recojo. Después podrás registrar el retorno si corresponde.', danger: true, pin: true, input: { label: 'Motivo (ej. se marcó por error, el cliente no recogió)', required: true }, confirmLabel: 'Deshacer recojo' }, (r) => equiposOrders.undoPickup(o.id, r.text, r.pin), 'Recojo deshecho')}>
+                  <RotateCcw size={13} /> Deshacer recojo
+                </button>
+              )}
               {/* Solo para recojo en oficina: los envíos por agencia se cierran con el seguimiento de la agencia. */}
               {isOffice && o.status === 'registrado' && (sh?.status === 'pendiente_envio' || sh?.status === 'en_transito') && can('equipos.shipments') && (
                 <button type="button" className={BTN_SECONDARY} disabled={busy} onClick={() => setDateAction('pickup')}>Cliente recogió</button>
