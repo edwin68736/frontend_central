@@ -12,7 +12,7 @@ import {
 import { apiError, BTN_PRIMARY, INPUT } from './common'
 import OrderDetail from './OrderDetail'
 import { useDebounced } from './hooks'
-import { printLabelsFor } from './printLabels'
+import LabelPrintModal from './LabelPrintModal'
 import OrderEditor from './OrderEditor'
 import ShippingDataModal from './ShippingDataModal'
 import PaymentModal from './PaymentModal'
@@ -64,7 +64,7 @@ export default function OrdersTab() {
   const [page, setPage] = useState(1)
   const [perPage, setPerPage] = useState<PerPageOption>(25)
   const [selected, setSelected] = useState<Set<number>>(new Set())
-  const [printing, setPrinting] = useState(false)
+  const [labelIds, setLabelIds] = useState<number[]>([])
   const dq = useDebounced(q, 450)
   const canShip = hasPermission('equipos.shipments')
   const [users, setUsers] = useState<{ id: number; name: string }[]>([])
@@ -127,10 +127,6 @@ export default function OrdersTab() {
   const allOnPage = pageIds.length > 0 && pageIds.every((id) => selected.has(id))
   const toggle = (id: number) => setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n })
   const togglePage = () => setSelected((s) => { const n = new Set(s); if (allOnPage) pageIds.forEach((id) => n.delete(id)); else pageIds.forEach((id) => n.add(id)); return n })
-  const printSelected = async () => {
-    setPrinting(true)
-    try { if (await printLabelsFor([...selected])) setSelected(new Set()) } catch (e) { toast.error(apiError(e, 'No se pudieron generar los rótulos')) } finally { setPrinting(false) }
-  }
 
   return (
     <div className="space-y-4">
@@ -158,7 +154,7 @@ export default function OrdersTab() {
         </select>
         <input type="date" aria-label="Desde" value={filter.from ?? ''} onChange={(e) => setF({ from: e.target.value || undefined })} className={SELECT} />
         <input type="date" aria-label="Hasta" value={filter.to ?? ''} onChange={(e) => setF({ to: e.target.value || undefined })} className={SELECT} />
-        {canShip && selected.size > 0 && <button type="button" className={BTN_PRIMARY} disabled={printing} onClick={() => void printSelected()}><Printer size={16} /> {printing ? 'Generando…' : `Imprimir rótulos (${selected.size})`}</button>}
+        {canShip && selected.size > 0 && <button type="button" className={BTN_PRIMARY} onClick={() => setLabelIds([...selected])}><Printer size={16} /> {`Imprimir rótulos (${selected.size})`}</button>}
         {canCreate && <button type="button" className={BTN_PRIMARY} onClick={() => setEditor({ open: true })}><Plus size={16} /> Nuevo pedido</button>}
       </div>
 
@@ -252,6 +248,7 @@ export default function OrdersTab() {
         customerId={payFor?.customer_id ?? null} customerName={payFor?.customer_name ?? ''} orderId={payFor?.id}
         suggestedAmount={payFor && payFor.balance_amount > 0 ? payFor.balance_amount : undefined}
       />
+      <LabelPrintModal ids={labelIds} onClose={() => setLabelIds([])} onDone={() => { setSelected(new Set()); void load() }} />
       <ShippingDataModal order={shipEdit} onClose={() => setShipEdit(null)} onSaved={() => void load()} />
       <OrderDetail
         orderId={detailId} onClose={() => setDetailId(null)} onChanged={() => void load()}

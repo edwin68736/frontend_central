@@ -10,7 +10,7 @@ import {
 import { apiError, BTN_PRIMARY, BTN_SECONDARY, formatDateTime, INPUT } from './common'
 import { fmtDate, money, PaymentBadge, ShipmentBadge, StatusBadge, UserBadge } from './ordersCommon'
 import { equiposProvider, type ShipmentEvent, type TariffQuote } from '@/services/equiposProvider.service'
-import { buildShippingLabel, openLabel } from './shippingLabel'
+import LabelPrintModal from './LabelPrintModal'
 import { useConfirm, type ConfirmOptions, type ConfirmResult } from './ConfirmProvider'
 import PaymentModal from './PaymentModal'
 import ShipmentDateModal from './ShipmentDateModal'
@@ -124,12 +124,8 @@ export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Pro
     if (r) await act(() => fn(r), ok)
   }
 
-  const printLabel = async () => {
-    if (!o) return
-    const blob = buildShippingLabel(o)
-    if (!openLabel(blob)) toast.error('El navegador bloqueó la ventana del rótulo; permite las ventanas emergentes')
-    try { await equiposOrders.labelPrinted(o.id); void load(); onChanged() } catch { /* no crítico */ }
-  }
+  const [labelIds, setLabelIds] = useState<number[]>([])
+  const printLabel = () => { if (o) setLabelIds([o.id]) }
 
   const sh = o?.shipment ?? null
 
@@ -436,7 +432,7 @@ export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Pro
               )}
               {sh && o.status === 'registrado' && can('equipos.shipments') && (
                 <span className="inline-flex items-center gap-1">
-                  <button type="button" className={BTN_SECONDARY} onClick={() => void printLabel()}><Printer size={13} /> Rótulo{sh.label_printed_at ? ' (reimprimir)' : ''}</button>
+                  <button type="button" className={BTN_SECONDARY} onClick={printLabel}><Printer size={13} /> Rótulo{sh.label_printed_at ? ' (reimprimir)' : ''}</button>
                 </span>
               )}
               {sh && (sh.status === 'en_transito' || sh.status === 'en_agencia') && o.status === 'registrado' && can('equipos.returns') && (
@@ -488,6 +484,8 @@ export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Pro
           else if (kind === 'arrival') void act(() => equiposOrders.arrived(o!.id, d), 'Llegada registrada')
           else if (kind === 'pickup') void act(() => equiposOrders.pickedUp(o!.id, d), 'Recojo registrado')
         }} />
+
+      <LabelPrintModal ids={labelIds} onClose={() => setLabelIds([])} onDone={() => { void load(); onChanged() }} />
 
       <ReturnModal open={retOpen} orderId={o?.id ?? null} onClose={() => setRetOpen(false)} onDone={() => { void load(); onChanged() }} />
 

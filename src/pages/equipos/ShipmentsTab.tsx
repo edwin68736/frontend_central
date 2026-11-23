@@ -11,7 +11,7 @@ import { apiError, BTN_PRIMARY, BTN_SECONDARY, INPUT } from './common'
 import OrderDetail from './OrderDetail'
 import { useConfirm } from './ConfirmProvider'
 import { useDebounced, usePaging } from './hooks'
-import { printLabelsFor } from './printLabels'
+import LabelPrintModal from './LabelPrintModal'
 import OrderEditor from './OrderEditor'
 import { AlertBadge, fmtDate, money, PaymentBadge } from './ordersCommon'
 
@@ -32,7 +32,7 @@ export default function ShipmentsTab() {
   const [carrierId, setCarrierId] = useState<number | null>(null)
   const confirm = useConfirm()
   const [selected, setSelected] = useState<Set<number>>(new Set())
-  const [printing, setPrinting] = useState(false)
+  const [labelIds, setLabelIds] = useState<number[]>([])
   const [q, setQ] = useState('')
   const dq = useDebounced(q, 450)
   const [carriers, setCarriers] = useState<EquipCarrier[]>([])
@@ -75,10 +75,6 @@ export default function ShipmentsTab() {
   const toggle = (id: number) => setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n })
   const allShown = paging.rows.length > 0 && paging.rows.every((r) => selected.has(r.order_id))
   const toggleShown = () => setSelected((s) => { const n = new Set(s); paging.rows.forEach((r) => (allShown ? n.delete(r.order_id) : n.add(r.order_id))); return n })
-  const printSelected = async () => {
-    setPrinting(true)
-    try { if (await printLabelsFor([...selected])) { setSelected(new Set()); void load() } } catch (e) { toast.error(apiError(e, 'No se pudieron generar los rótulos')) } finally { setPrinting(false) }
-  }
   const confirmRun = async (title: string, message: string, label: string, orderId: number, fn: () => Promise<{ warnings: string[] }>, ok: string) => {
     if (await confirm({ title, message, confirmLabel: label })) await run(orderId, fn, ok)
   }
@@ -104,7 +100,7 @@ export default function ShipmentsTab() {
           <label className="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer"><input type="checkbox" checked={allShown} onChange={toggleShown} className="rounded" /> Seleccionar página</label>
         )}
         {canShip && selected.size > 0 && (
-          <button type="button" className={BTN_PRIMARY} disabled={printing} onClick={() => void printSelected()}><Printer size={15} /> {printing ? 'Generando…' : `Imprimir rótulos (${selected.size})`}</button>
+          <button type="button" className={BTN_PRIMARY} onClick={() => setLabelIds([...selected])}><Printer size={15} /> {`Imprimir rótulos (${selected.size})`}</button>
         )}
       </div>
 
@@ -169,6 +165,7 @@ export default function ShipmentsTab() {
 
       {rows.length > 0 && <PaginationBar {...paging.barProps} itemLabel="envíos" />}
 
+      <LabelPrintModal ids={labelIds} onClose={() => setLabelIds([])} onDone={() => { setSelected(new Set()); void load() }} />
       <OrderDetail orderId={detailId} onClose={() => setDetailId(null)} onChanged={() => void load()} onEdit={(id) => { setDetailId(null); setEditId(id) }} />
       <OrderEditor open={editId != null} orderId={editId ?? undefined} onClose={() => setEditId(null)} onSaved={() => void load()} />
     </div>
