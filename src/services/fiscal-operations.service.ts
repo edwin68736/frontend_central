@@ -172,6 +172,19 @@ export interface TenantFiscalSummaryRow {
   scan_error?: string
   /** Su pendiente más antiguo lleva 3 días o más sin enviarse. */
   stale: boolean
+  /** Plan vigente y su uso (0 en un límite = ilimitado). catalog_count = productos + servicios. */
+  plan_name: string
+  max_users: number
+  max_branches: number
+  max_products: number
+  users_count: number
+  products_count: number
+  services_count: number
+  catalog_count: number
+  branches_count: number
+  usage_scanned_at: string | null
+  /** exceeded = llegó o superó algún límite; near = al 80 % o más; '' = en regla o sin conteo todavía. */
+  limit_status: 'exceeded' | 'near' | ''
 }
 
 export interface TenantFiscalSummaryTotals {
@@ -187,6 +200,9 @@ export interface TenantFiscalSummaryTotals {
   /** Tenants con un pendiente de 3 días o más. */
   stale: number
   scan_errors: number
+  /** Tenants que llegaron o superaron algún límite de su plan / que están al 80 % o más. */
+  over_limit: number
+  near_limit: number
 }
 
 export interface TenantFiscalSummaryResponse {
@@ -207,7 +223,9 @@ export interface TenantFiscalSummaryParams {
   q?: string
   only_pending?: boolean
   stale_only?: boolean
-  sort?: 'to_send' | 'emitted' | 'accepted' | 'sent' | 'rejected' | 'name' | 'ruc' | 'oldest' | 'last_issue' | 'scanned'
+  /** Solo tenants que llegaron (exceeded) o se acercan (near, incluye los excedidos) a un límite de su plan. */
+  limit_status?: 'exceeded' | 'near'
+  sort?: 'to_send' | 'emitted' | 'accepted' | 'sent' | 'rejected' | 'name' | 'ruc' | 'oldest' | 'last_issue' | 'scanned' | 'plan' | 'users' | 'products' | 'branches'
   /** Dirección del orden; vacío = la natural de la columna (números de mayor a menor, nombre A-Z). */
   dir?: 'asc' | 'desc'
   page?: number

@@ -41,12 +41,20 @@ const NATURAL_DIR: Record<SortKey, SortDir> = {
   ruc: 'asc',
   oldest: 'asc',
   scanned: 'asc',
+  plan: 'asc',
+  users: 'desc',
+  products: 'desc',
+  branches: 'desc',
 }
 
 /** Columnas de la tabla; las que traen `sort` se ordenan al hacer clic en el encabezado. */
 const COLUMNS: { label: string; sort?: SortKey; right?: boolean }[] = [
   { label: 'Tenant', sort: 'name' },
   { label: 'RUC', sort: 'ruc' },
+  { label: 'Plan', sort: 'plan' },
+  { label: 'Usuarios', sort: 'users', right: true },
+  { label: 'Productos', sort: 'products', right: true },
+  { label: 'Sucursales', sort: 'branches', right: true },
   { label: 'Emitidos', sort: 'emitted', right: true },
   { label: 'Aceptados', sort: 'accepted', right: true },
   { label: 'Faltan enviar', sort: 'to_send', right: true },
@@ -67,6 +75,10 @@ const SORTS: { v: NonNullable<TenantFiscalSummaryParams['sort']>; l: string }[] 
   { v: 'oldest', l: 'Pendiente más antiguo' },
   { v: 'scanned', l: 'Verificado hace más tiempo' },
   { v: 'name', l: 'Nombre (A-Z)' },
+  { v: 'users', l: 'Mayor uso de usuarios' },
+  { v: 'products', l: 'Mayor uso de productos' },
+  { v: 'branches', l: 'Mayor uso de sucursales' },
+  { v: 'plan', l: 'Plan (A-Z)' },
 ]
 
 /** Antigüedad del pendiente más antiguo (la fecha viene como día, medianoche UTC). */
@@ -75,6 +87,21 @@ function ageDays(iso: string | null | undefined): number | null {
   const d = new Date(iso).getTime()
   if (Number.isNaN(d)) return null
   return Math.max(0, Math.floor((Date.now() - d) / 86400000))
+}
+
+/** Uso frente al límite del plan: «2/5», «340/∞» (0 = ilimitado). Ámbar desde el 80 %, rojo al llegar o superar el límite. */
+function UsageCell({ count, max, scanned, detail }: { count: number; max: number; scanned: string | null; detail?: string }) {
+  if (!scanned) return <span className="text-slate-300" title="Aún sin conteo">—</span>
+  const ratio = max > 0 ? count / max : -1
+  const tone = ratio >= 1 ? 'text-red-600 font-semibold' : ratio >= 0.8 ? 'text-amber-600 font-medium' : 'text-slate-700'
+  return (
+    <div className="leading-tight" title={max > 0 ? count + ' de ' + max + (ratio >= 1 ? ' (límite alcanzado)' : '') : 'Sin límite en su plan'}>
+      <span className={'tabular-nums ' + tone}>
+        {count.toLocaleString()}/{max > 0 ? max.toLocaleString() : '∞'}
+      </span>
+      {detail && <div className="text-[10px] text-slate-400">{detail}</div>}
+    </div>
+  )
 }
 
 function Stat({ label, value, tone }: { label: string; value: number; tone?: string }) {
@@ -97,6 +124,7 @@ export default function TenantFiscalSummary() {
   const [qApplied, setQApplied] = useState('')
   const [onlyPending, setOnlyPending] = useState(false)
   const [staleOnly, setStaleOnly] = useState(false)
+  const [limitStatus, setLimitStatus] = useState<'' | 'exceeded' | 'near'>('')
   const [resendTarget, setResendTarget] = useState<TenantFiscalSummaryRow | null>(null)
   const [resending, setResending] = useState(false)
   const [sort, setSort] = useState<SortKey>('to_send')
@@ -130,12 +158,13 @@ export default function TenantFiscalSummary() {
       q: qApplied || undefined,
       only_pending: onlyPending,
       stale_only: staleOnly,
+      limit_status: limitStatus || undefined,
       sort,
       dir: sortDir,
       page,
       per_page: perPage,
     }),
-    [preset, from, to, docTypes, rucApplied, qApplied, onlyPending, staleOnly, sort, sortDir, page, perPage]
+    [preset, from, to, docTypes, rucApplied, qApplied, onlyPending, staleOnly, limitStatus, sort, sortDir, page, perPage]
   )
 
   const load = useCallback(async () => {
@@ -240,6 +269,14 @@ export default function TenantFiscalSummary() {
         { key: 'name', label: 'Tenant' },
         { key: 'slug', label: 'Slug' },
         { key: 'ruc', label: 'RUC' },
+        { key: 'plan_name', label: 'Plan' },
+        { key: 'users_count', label: 'Usuarios', excelNumber: true },
+        { key: 'max_users', label: 'Límite usuarios (0 = ilimitado)', excelNumber: true },
+        { key: 'catalog_count', label: 'Productos + servicios', excelNumber: true },
+        { key: 'services_count', label: 'De los cuales servicios', excelNumber: true },
+        { key: 'max_products', label: 'Límite productos (0 = ilimitado)', excelNumber: true },
+        { key: 'branches_count', label: 'Sucursales', excelNumber: true },
+        { key: 'max_branches', label: 'Límite sucursales (0 = ilimitado)', excelNumber: true },
         { key: 'tenant_status', label: 'Estado tenant' },
         { key: 'emitted', label: 'Emitidos', excelNumber: true },
         { key: 'accepted', label: 'Aceptados', excelNumber: true },
@@ -406,6 +443,19 @@ export default function TenantFiscalSummary() {
             Solo atrasados (3+ días)
           </label>
           <select
+            value={limitStatus}
+            onChange={(e) => {
+              setLimitStatus(e.target.value as '' | 'exceeded' | 'near')
+              setPage(1)
+            }}
+            aria-label="Filtrar por límites del plan"
+            className="border border-slate-200 rounded-lg px-2 py-1.5 text-sm bg-white"
+          >
+            <option value="">Todos los límites</option>
+            <option value="exceeded">Límite alcanzado o superado</option>
+            <option value="near">Cerca del límite (80 % +)</option>
+          </select>
+          <select
             value={sort}
             onChange={(e) => {
               setSort(e.target.value as typeof sort)
@@ -424,7 +474,7 @@ export default function TenantFiscalSummary() {
         </div>
 
         {totals && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-8 gap-2">
             <Stat label="Emitidos" value={totals.emitted} />
             <Stat label="Aceptados" value={totals.accepted} tone="text-emerald-700" />
             <Stat label="Faltan enviar" value={totals.to_send} tone={totals.to_send > 0 ? 'text-red-600' : undefined} />
@@ -432,6 +482,7 @@ export default function TenantFiscalSummary() {
             <Stat label="Rechazados" value={totals.rejected} />
             <Stat label="Tenants con pendientes" value={totals.with_to_send} />
             <Stat label="Con pendientes de 3+ días" value={totals.stale} tone={totals.stale > 0 ? 'text-red-600' : undefined} />
+            <Stat label="Con límite del plan alcanzado" value={totals.over_limit ?? 0} tone={(totals.over_limit ?? 0) > 0 ? 'text-red-600' : undefined} />
           </div>
         )}
         {totals && totals.scan_errors > 0 && (
@@ -497,6 +548,10 @@ export default function TenantFiscalSummary() {
                       </div>
                     </td>
                     <td className="px-3 py-2 text-xs text-slate-600">{r.ruc || '—'}</td>
+                    <td className="px-3 py-2 text-xs text-slate-700">{r.plan_name || <span className="text-slate-300">Sin plan</span>}</td>
+                    <td className="px-3 py-2 text-right"><UsageCell count={r.users_count} max={r.max_users} scanned={r.usage_scanned_at} /></td>
+                    <td className="px-3 py-2 text-right"><UsageCell count={r.catalog_count} max={r.max_products} scanned={r.usage_scanned_at} detail={r.services_count > 0 ? r.products_count + ' prod. + ' + r.services_count + ' serv.' : undefined} /></td>
+                    <td className="px-3 py-2 text-right"><UsageCell count={r.branches_count} max={r.max_branches} scanned={r.usage_scanned_at} /></td>
                     <td className="px-3 py-2 text-right tabular-nums">{r.emitted.toLocaleString()}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-emerald-700">{r.accepted.toLocaleString()}</td>
                     <td className="px-3 py-2 text-right">
@@ -557,7 +612,7 @@ export default function TenantFiscalSummary() {
                   {open && (
                     <tr className="bg-slate-50/60">
                       <td />
-                      <td colSpan={11} className="px-3 py-2">
+                      <td colSpan={15} className="px-3 py-2">
                         {Object.keys(r.by_type).length === 0 ? (
                           <span className="text-xs text-slate-400">Sin comprobantes en el rango y tipos elegidos.</span>
                         ) : (
@@ -585,7 +640,7 @@ export default function TenantFiscalSummary() {
             })}
             {data && data.items.length === 0 && (
               <tr>
-                <td colSpan={12} className="px-3 py-8 text-center text-slate-400">
+                <td colSpan={16} className="px-3 py-8 text-center text-slate-400">
                   Ningún tenant coincide con estos filtros.
                 </td>
               </tr>
