@@ -226,7 +226,7 @@ export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Pro
             <div className="flex flex-wrap items-center gap-2">
               <StatusBadge value={o.status} />
               <PaymentBadge value={o.payment_status} />
-              {sh && <ShipmentBadge value={sh.status} />}
+              {sh && <ShipmentBadge value={sh.status} mode={sh.delivery_mode} />}
               <UserBadge id={o.created_by} name={o.created_by_name} />
               <span className="text-xs text-slate-500 ml-auto">{SALE_TYPE_LABEL[o.sale_type]} · {fmtDate(o.order_date)}</span>
             </div>
@@ -383,8 +383,8 @@ export default function OrderDetail({ orderId, onClose, onChanged, onEdit }: Pro
                     {(o.payments ?? []).map((p) => (
                       <li key={p.payment_id} className={`flex flex-wrap gap-x-4 px-3 py-1.5 ${p.status !== 'vigente' ? 'text-slate-400 line-through' : ''}`}>
                         <span>{fmtDate(p.paid_at)}</span><span className="font-medium">{money(p.amount)}</span>
-                        <span>{METHOD_LABEL[p.method] ?? p.method} · {p.moment === 'al_recoger' ? 'al recoger' : 'anticipado'}</span>
-                        {p.reference && <span>Op. {p.reference}</span>}{p.invoice && <span>{p.invoice}</span>}
+                        <span title={`Medio de pago: ${METHOD_LABEL[p.method] ?? p.method}`}>{p.invoice ? <span className="font-medium">{p.invoice}</span> : (METHOD_LABEL[p.method] ?? p.method)} · {p.moment === 'al_recoger' ? 'al recoger' : 'anticipado'}</span>
+                        {p.reference && <span>Op. {p.reference}</span>}
                         {p.voucher_mime ? (
                           <button type="button" disabled={voucherBusy === p.payment_id} onClick={() => void openVoucher(p.payment_id)} className="inline-flex items-center gap-1 text-indigo-600 hover:underline no-underline"><FileImage size={13} /> Ver voucher</button>
                         ) : can('equipos.payments') && p.status === 'vigente' ? (

@@ -19,6 +19,8 @@ export const ORDER_STATUS_LABEL: Record<string, string> = { borrador: 'Borrador'
 export const SHIPMENT_STATUS_LABEL: Record<string, string> = {
   pendiente_envio: 'Por despachar', en_transito: 'En tránsito', en_agencia: 'En agencia', entregado: 'Recogido', retorno: 'En retorno',
 }
+/** Opciones del filtro de envío: «Entregado en oficina» es un entregado con modalidad oficina (lo separa el servidor). */
+export const SHIPMENT_FILTER_LABEL: Record<string, string> = { ...SHIPMENT_STATUS_LABEL, entregado_oficina: 'Entregado en oficina' }
 export const DELIVERY_MODE_LABEL: Record<string, string> = { agencia: 'Agencia', oficina: 'Recojo en oficina', pendiente_recojo: 'Recojo en oficina' }
 
 export interface EquipCustomerRow {
@@ -222,6 +224,8 @@ export interface OrderRow {
   guide_number: string
   department: string
   summary: string
+  /** Un texto por producto del pedido («2x TK-E583»). */
+  summary_items?: string[]
   created_by: number | null
   created_by_name: string
   freight_cost: number
@@ -414,7 +418,7 @@ export const equiposOrders = {
   listPayments: (params: { customer_id?: number; from?: string; to?: string; method?: string; status?: string; q?: string; page?: number; per_page?: number }) =>
     api.get<{ data: PaymentListResult }>(`${base}/payments`, { params }).then((r) => ({ ...r.data.data, rows: r.data.data.rows ?? [] })),
   /** Planes vigentes de Tukifac (para el ítem «Plan Tukifac»). */
-  listPlans: () => api.get<{ data: { id: number; name: string; price: number }[] }>(`${base}/plans`).then((r) => r.data.data ?? []),
+  listPlans: () => api.get<{ data: { id: number; name: string; months: number; price: number }[] }>(`${base}/plans`).then((r) => r.data.data ?? []),
   /** Adjunta (o reemplaza) el voucher de un cobro: imagen jpg/png/webp o PDF de hasta 5 MB. */
   uploadVoucher: (paymentId: number, file: File) => {
     const fd = new FormData()

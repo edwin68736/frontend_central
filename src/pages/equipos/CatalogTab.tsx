@@ -34,7 +34,8 @@ export default function CatalogTab() {
   const [combos, setCombos] = useState<EquipCombo[]>([])
   const [loading, setLoading] = useState(true)
   const [q, setQ] = useState('')
-  const [showInactive, setShowInactive] = useState(false)
+  const [stateFilter, setStateFilter] = useState<'activos' | 'inactivos' | 'todos'>('activos')
+  const matchState = (active: boolean) => stateFilter === 'todos' || (stateFilter === 'activos') === active
 
   const [pForm, setPForm] = useState<{ open: boolean; id?: number; data: EquipProductInput }>({ open: false, data: EMPTY_PRODUCT })
   const [cForm, setCForm] = useState<{ open: boolean; data: ComboForm }>({ open: false, data: EMPTY_COMBO })
@@ -63,12 +64,12 @@ export default function CatalogTab() {
 
   const term = dq.trim().toLowerCase()
   const shownProducts = useMemo(
-    () => products.filter((p) => (showInactive || p.active) && (!term || p.code.toLowerCase().includes(term) || p.name.toLowerCase().includes(term))),
-    [products, term, showInactive],
+    () => products.filter((p) => matchState(p.active) && (!term || p.code.toLowerCase().includes(term) || p.name.toLowerCase().includes(term))),
+    [products, term, stateFilter],
   )
   const shownCombos = useMemo(
-    () => combos.filter((c) => (showInactive || c.active) && (!term || c.code.toLowerCase().includes(term))),
-    [combos, term, showInactive],
+    () => combos.filter((c) => matchState(c.active) && (!term || c.code.toLowerCase().includes(term))),
+    [combos, term, stateFilter],
   )
   const activeProducts = useMemo(() => products.filter((p) => p.active), [products])
   const prodP = usePaging(shownProducts, 25)
@@ -146,9 +147,11 @@ export default function CatalogTab() {
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar producto o combo…" className={INPUT + ' pl-9'} />
         </div>
-        <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
-          <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} className="rounded" /> Ver inactivos
-        </label>
+        <select aria-label="Estado" value={stateFilter} onChange={(e) => setStateFilter(e.target.value as 'activos' | 'inactivos' | 'todos')} className={INPUT} style={{ width: '11rem' }}>
+          <option value="activos">Solo activos</option>
+          <option value="inactivos">Solo inactivos</option>
+          <option value="todos">Todos</option>
+        </select>
       </div>
 
       <section>
@@ -165,6 +168,7 @@ export default function CatalogTab() {
             <thead className="bg-slate-50 text-xs font-semibold text-slate-500 uppercase tracking-wide">
               <tr>
                 <th className="px-3 py-2 text-left">Código</th>
+                <th className="px-3 py-2 text-left">Producto</th>
                 <th className="px-3 py-2 text-left">Tipo</th>
                 <th className="px-3 py-2 text-left">Notas</th>
                 <th className="px-3 py-2 text-right">Precio ref.</th>
@@ -178,7 +182,8 @@ export default function CatalogTab() {
             <tbody className="divide-y divide-slate-100">
               {prodP.rows.map((p) => (
                 <tr key={p.id} className="hover:bg-slate-50/70">
-                  <td className="px-3 py-2 font-medium text-slate-800">{p.code}{p.name !== p.code && <span className="block text-xs text-slate-400 font-normal">{p.name}</span>}</td>
+                  <td className="px-3 py-2 font-medium text-slate-800">{p.code}</td>
+                  <td className="px-3 py-2 text-slate-700">{p.name || p.code}</td>
                   <td className="px-3 py-2 text-slate-600">{EQUIP_KIND_LABEL[p.kind]}</td>
                   <td className="px-3 py-2 text-slate-500 text-xs">{p.notes || '—'}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{p.reference_price > 0 ? `S/ ${p.reference_price.toFixed(2)}` : '—'}</td>
@@ -189,7 +194,7 @@ export default function CatalogTab() {
                   <td className="px-3 py-2 text-right">{canEdit && <button type="button" className={BTN_SECONDARY} onClick={() => openProduct(p)}><Pencil size={12} /> Editar</button>}</td>
                 </tr>
               ))}
-              {shownProducts.length === 0 && <tr><td colSpan={9} className="px-4 py-10 text-center text-slate-400">No hay productos. {canEdit ? 'Crea el primero o importa el Excel.' : ''}</td></tr>}
+              {shownProducts.length === 0 && <tr><td colSpan={10} className="px-4 py-10 text-center text-slate-400">No hay productos. {canEdit ? 'Crea el primero o importa el Excel.' : ''}</td></tr>}
             </tbody>
           </table>
           {shownProducts.length > 0 && <PaginationBar {...prodP.barProps} itemLabel="productos" />}

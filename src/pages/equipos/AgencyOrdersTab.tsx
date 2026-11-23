@@ -5,7 +5,7 @@ import PaginationBar from '@/components/ui/PaginationBar'
 import type { PerPageOption } from '@/services/pagination'
 import Spinner from '@/components/ui/Spinner'
 import { useAuth } from '@/contexts/AuthContext'
-import { equiposOrders, type OrderFilter, type OrderListResult } from '@/services/equiposOrders.service'
+import { equiposOrders, PAYMENT_STATUS_LABEL, type OrderFilter, type OrderListResult } from '@/services/equiposOrders.service'
 import { apiError, INPUT } from './common'
 import OrderDetail from './OrderDetail'
 import ReturnModal from './ReturnModal'
@@ -64,6 +64,10 @@ export default function AgencyOrdersTab() {
           <option value="">Todos los usuarios</option>
           {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
           <option value="none">Sin usuario</option>
+        </select>
+        <select aria-label="Pago" value={filter.payment_status ?? ''} onChange={(e) => setF({ payment_status: e.target.value || undefined })} className={SELECT}>
+          <option value="">Todo pago</option>
+          {Object.entries(PAYMENT_STATUS_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
         <label className="flex items-center gap-2 text-sm text-slate-600 px-2 py-2">
           <input type="checkbox" checked={showAll} onChange={(e) => { setPage(1); setShowAll(e.target.checked) }} className="rounded" /> Ver todos los pedidos

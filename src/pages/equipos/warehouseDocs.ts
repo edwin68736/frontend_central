@@ -135,7 +135,8 @@ function buildDoc(spec: DocSpec): Blob {
 }
 
 const lineCode = (l: ProductLine) => l.code
-const lineName = (l: ProductLine) => (l.name && l.name !== l.code ? l.name : '')
+// El nombre se imprime siempre: si el producto no tiene uno propio, es el mismo código (columna «Producto» nunca vacía).
+const lineName = (l: ProductLine) => l.name || l.code
 
 export function buildRequirementDoc(r: RequirementView): Blob {
   return buildDoc({

@@ -7,7 +7,7 @@ import type { PerPageOption } from '@/services/pagination'
 import Spinner from '@/components/ui/Spinner'
 import { useAuth } from '@/contexts/AuthContext'
 import {
-  equiposOrders, ORDER_STATUS_LABEL, PAYMENT_STATUS_LABEL, SHIPMENT_STATUS_LABEL, type OrderFilter, type OrderListResult, type OrderRow,
+  equiposOrders, ORDER_STATUS_LABEL, PAYMENT_STATUS_LABEL, SHIPMENT_FILTER_LABEL, type OrderFilter, type OrderListResult, type OrderRow,
 } from '@/services/equiposOrders.service'
 import { apiError, BTN_PRIMARY, INPUT } from './common'
 import OrderDetail from './OrderDetail'
@@ -149,7 +149,7 @@ export default function OrdersTab() {
         </select>
         <select aria-label="Envío" value={filter.shipment_status ?? ''} onChange={(e) => setF({ shipment_status: e.target.value || undefined })} className={SELECT}>
           <option value="">Todo envío</option>
-          {Object.entries(SHIPMENT_STATUS_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          {Object.entries(SHIPMENT_FILTER_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
         <select aria-label="Usuario" value={String(filter.created_by ?? '')} onChange={(e) => setF({ created_by: e.target.value === 'none' ? 'none' : e.target.value ? Number(e.target.value) : undefined })} className={SELECT}>
           <option value="">Todos los usuarios</option>
@@ -188,7 +188,8 @@ export default function OrdersTab() {
                   </td>
                   <td className="px-3 whitespace-nowrap text-slate-600">{fmtDate(r.order_date)}</td>
                   <td className="px-3"><span className="text-slate-800">{r.customer_name}</span><span className="block text-xs text-slate-400">{r.customer_doc_type} {r.customer_doc_number}{r.department ? ` · ${r.department}` : ''}</span></td>
-                  <td className="px-3 text-slate-600 max-w-xs truncate" title={r.summary}>{r.summary}{r.is_gift && <span className="ml-1 text-xs text-emerald-700">(obsequio)</span>}</td>
+                  <td className="px-3 text-slate-600 min-w-48 max-w-xs" title={r.summary}>
+                    {(r.summary_items?.length ? r.summary_items : r.summary ? [r.summary] : []).map((t, i) => <span key={i} className="block leading-snug">{t}</span>)}{r.is_gift && <span className="ml-1 text-xs text-emerald-700">(obsequio)</span>}</td>
                   {canSeeMoney && <td className="px-3 text-right whitespace-nowrap">{money(r.total_amount)}</td>}
                   {canSeeMoney && <td className="px-3 text-right whitespace-nowrap text-slate-600">{money(r.paid_amount)}</td>}
                   {canSeeMoney && <td className={`px-3 text-right whitespace-nowrap ${r.balance_amount > 0 ? 'text-red-700 font-medium' : 'text-slate-400'}`}>{money(r.balance_amount)}</td>}
@@ -226,7 +227,7 @@ export default function OrdersTab() {
                     ) : <UserBadge id={r.created_by} name={r.created_by_name} />}
                   </td>
                   <td className="px-3"><PaymentBadge value={r.payment_status} /></td>
-                  <td className="px-3"><ShipmentBadge value={r.shipment_status} /></td>
+                  <td className="px-3"><ShipmentBadge value={r.shipment_status} mode={r.delivery_mode} /></td>
                   <td className="px-2 text-right" onClick={(e) => e.stopPropagation()}>
                     <RowMenu label={`Acciones del pedido ${r.order_number}`} items={[
                       { key: 'view', label: 'Ver detalle', icon: <Eye size={14} />, onClick: () => setDetailId(r.id) },

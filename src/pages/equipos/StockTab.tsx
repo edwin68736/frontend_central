@@ -115,12 +115,12 @@ export default function StockTab() {
     if (rows.length === 0) return toast.error('No hay stock para exportar')
     const header = [
       'Código', 'Producto', 'Tipo', 'Stock inicial', 'Ingresos', 'Salidas directas indep.', 'Salidas directas promo TK',
-      'Salidas combos indep.', 'Salidas combos promo TK', 'Total salidas', 'Reingresos', 'Ajustes', 'Stock actual',
+      'Salidas combos indep.', 'Salidas combos promo TK', 'Total salidas', 'Reingresos', 'Ajustes', 'Stock actual', 'Dañados',
       'Umbral amarillo', 'Umbral verde', 'Semáforo',
     ]
     const body = rows.map((r) => [
       r.code, r.name, EQUIP_KIND_LABEL[r.kind], r.opening, r.ingresos, r.direct_independiente, r.direct_promo_tk,
-      r.combo_independiente, r.combo_promo_tk, r.total_out, r.reingresos, r.adjustments, r.current,
+      r.combo_independiente, r.combo_promo_tk, r.total_out, r.reingresos, r.adjustments, r.current, r.damaged ?? 0,
       r.yellow_threshold, r.green_threshold, r.semaphore,
     ])
     try {
@@ -240,6 +240,7 @@ export default function StockTab() {
                   <th rowSpan={2} className="px-3 py-2 text-right">Reingr.</th>
                   <th rowSpan={2} className="px-3 py-2 text-right" title="Ajustes y bajas del mes (con signo)">Ajustes</th>
                   <th rowSpan={2} className="px-3 py-2 text-right border-l border-slate-200">Stock actual</th>
+                  <th rowSpan={2} className="px-3 py-2 text-right" title="Equipos recibidos dañados en retornos: no vuelven al stock">Dañados</th>
                   <th rowSpan={2} className="px-3 py-2 text-center">Semáforo</th>
                   <th rowSpan={2} className="px-3 py-2" />
                 </tr>
@@ -267,6 +268,7 @@ export default function StockTab() {
                     <td className="px-3 py-2 text-right">{num(r.reingresos)}</td>
                     <td className="px-3 py-2 text-right">{num(r.adjustments)}</td>
                     <td className={`px-3 py-2 text-right font-semibold border-l border-slate-100 ${r.current < 0 ? 'text-red-600' : 'text-slate-800'}`}>{r.current}</td>
+                    <td className={`px-3 py-2 text-right ${(r.damaged ?? 0) > 0 ? 'font-medium text-red-600' : 'text-slate-400'}`}>{num(r.damaged ?? 0)}</td>
                     <td className="px-3 py-2 text-center"><SemaphoreBadge value={r.semaphore} /></td>
                     <td className="px-3 py-2 text-right whitespace-nowrap">
                       <button type="button" className={BTN_SECONDARY} onClick={() => void openKardex(r)} title="Ver kardex del producto">

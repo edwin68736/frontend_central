@@ -31,11 +31,36 @@ function contentLines(doc: jsPDF, o: OrderView): string[] {
   return [...lines.slice(0, MAX_CONTENT_LINES - 1), `… y ${lines.length - MAX_CONTENT_LINES + 1} línea(s) más`]
 }
 
-/** Altura (mm) que necesita el rótulo: 60 mm como mínimo y más si el contenido tiene muchas líneas. */
+const DEST_PLACE_FONT = 9
+const DEST_AGENCY_FONT = 7.5
+const DEST_AGENCY_LINE_H = DEST_AGENCY_FONT * 0.3528 * 1.15
+/** Tope de líneas de la agencia de destino: se imprime completa (nombre y dirección); más allá se corta con «…». */
+const MAX_AGENCY_LINES = 6
+const destColumnWidth = () => COL_SPLIT - PAD - 1 - 3.6
+
+/** Líneas del destino: la zona (distrito - provincia - departamento) y el nombre/dirección completo de la agencia. */
+function destLines(doc: jsPDF, o: OrderView): { place: string[]; agency: string[] } {
+  const sh = o.shipment
+  const iw = destColumnWidth()
+  const placeText = [sh?.destination_district, sh?.destination_province, sh?.destination_department].filter(Boolean).join(' - ').toUpperCase()
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(DEST_PLACE_FONT)
+  const place = placeText ? (doc.splitTextToSize(placeText, iw) as string[]).slice(0, 2) : []
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(DEST_AGENCY_FONT)
+  let agency = sh?.destination_agency ? (doc.splitTextToSize(sh.destination_agency, iw) as string[]) : []
+  if (agency.length > MAX_AGENCY_LINES) agency = [...agency.slice(0, MAX_AGENCY_LINES - 1), `${agency[MAX_AGENCY_LINES - 1].replace(/\s+\S*$/, '')}…`]
+  return { place, agency }
+}
+
+/** Altura (mm) que necesita el rótulo: 60 mm como mínimo y más si el contenido o la agencia de destino tienen muchas líneas. */
 function labelHeight(doc: jsPDF, o: OrderView): number {
   const n = contentLines(doc, o).length
   const needed = CONTENT_FIRST_BASELINE - BOX_BOTTOM_Y + (n - 1) * CONTENT_LINE_H + CONTENT_BOTTOM_PAD
-  return LABEL_H + Math.max(0, Math.ceil((needed - BOX_BASE_H) * 10) / 10)
+  const d = destLines(doc, o)
+  const destEnd = 37.8 + (d.place.length ? d.place.length * DEST_PLACE_FONT * 0.38 + 1.2 : 0) + (d.agency.length ? 2.2 + d.agency.length * DEST_AGENCY_LINE_H : 0) + CONTENT_BOTTOM_PAD
+  const destNeeded = destEnd - BOX_BOTTOM_Y
+  return LABEL_H + Math.max(0, Math.ceil((Math.max(needed, destNeeded) - BOX_BASE_H) * 10) / 10)
 }
 
 /**
@@ -106,10 +131,14 @@ function drawLabel(doc: jsPDF, o: OrderView, x: number, y: number, height = labe
 
   // Destino
   tag('DESTINO', ix, y + 33.2)
-  const place = [sh?.destination_district, sh?.destination_province, sh?.destination_department].filter(Boolean).join(' - ')
+  const dest = destLines(doc, o)
   let py = y + 37.8
-  if (place) py += text(place.toUpperCase(), ix, py, 9, true, iw, 2) + 1.2
-  if (sh?.destination_agency) text(sh.destination_agency, ix, py + 2.2, 7.5, false, iw, 1)
+  if (dest.place.length) py += text(dest.place.join(' '), ix, py, DEST_PLACE_FONT, true, iw, 2) + 1.2
+  if (dest.agency.length) {
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(DEST_AGENCY_FONT)
+    doc.text(dest.agency, ix, py + 2.2)
+  }
 
   // Modalidad de entrega (el N° de guía ya no va en el rótulo) y quién recoge
   const gx = rx0 + 1.8

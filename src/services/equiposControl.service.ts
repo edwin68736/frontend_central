@@ -148,8 +148,8 @@ export const equiposControl = {
     api.patch<{ data: EquipReturnView; warnings?: string[] }>(`${base}/returns/${id}/guide`, { guide_number, code }).then((r) => ({ view: r.data.data, warnings: r.data.warnings ?? [] })),
   refreshReturnTracking: (id: number) => api.post<{ data: EquipReturnView }>(`${base}/returns/${id}/provider/refresh`).then((r) => r.data.data),
   /** Casilla «Recibido»: cierra el retorno; en buen estado reingresa al stock. */
-  receiveReturn: (id: number, condition: 'buen_estado' | 'danado') =>
-    api.post<{ data: EquipReturnView }>(`${base}/returns/${id}/receive`, { condition }).then((r) => r.data.data),
+  receiveReturn: (id: number, b: { condition: 'buen_estado' | 'danado'; discarded?: boolean; return_cost?: number; unpaid_balance?: number; notes?: string }) =>
+    api.post<{ data: EquipReturnView }>(`${base}/returns/${id}/receive`, b).then((r) => r.data.data),
   cancelReturn: (id: number, reason: string, pin?: string) =>
     api.post<{ data: EquipReturnView }>(`${base}/returns/${id}/cancel`, { reason }, pin ? { headers: { 'X-Security-Pin': pin } } : undefined).then((r) => r.data.data),
   reship: (id: number) => api.post<{ data: OrderView }>(`${base}/returns/${id}/reship`).then((r) => r.data.data),

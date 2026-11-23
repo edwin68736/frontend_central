@@ -68,7 +68,7 @@ export default function OrderEditor({ open, onClose, orderId, onSaved }: Props) 
   const [products, setProducts] = useState<EquipProduct[]>([])
   const [combos, setCombos] = useState<EquipCombo[]>([])
   const [carriers, setCarriers] = useState<EquipCarrier[]>([])
-  const [plans, setPlans] = useState<{ id: number; name: string; price: number }[]>([])
+  const [plans, setPlans] = useState<{ id: number; name: string; months: number; price: number }[]>([])
   const [form, setForm] = useState<OrderInput>(emptyForm(null))
   const [status, setStatus] = useState<string>('borrador')
   const [createdId, setCreatedId] = useState<number | null>(null)
@@ -524,25 +524,18 @@ export default function OrderEditor({ open, onClose, orderId, onSaved }: Props) 
                         <select aria-label="Plan de Tukifac" value={it.description} className={INPUT}
                           onChange={(e) => {
                             const pl = plans.find((x) => x.name === e.target.value)
-                            const months = it.plan_months > 0 ? it.plan_months : 1
-                            // Elegir el plan propone el precio de lista (mensual × meses); sigue siendo editable.
-                            setItem(i, { description: e.target.value, plan_months: months, ...(pl ? { unit_price: Math.round(pl.price * months * 100) / 100 } : {}) })
+                            // Cada opción ya es plan + periodo: fija los meses y propone el precio del periodo (editable).
+                            setItem(i, pl ? { description: pl.name, plan_months: pl.months, unit_price: pl.price } : { description: e.target.value })
                           }}>
                           <option value="">Elegir plan…</option>
-                          {plans.map((pl) => <option key={pl.id} value={pl.name}>{pl.name}</option>)}
+                          {plans.map((pl) => <option key={pl.name} value={pl.name}>{pl.name}</option>)}
                           {/* Pedidos antiguos con un plan escrito a mano: se conserva su descripción. */}
                           {it.description && !plans.some((pl) => pl.name === it.description) && <option value={it.description}>{it.description}</option>}
                         </select>
                       )}
-                      {it.line_type === 'plan' && (
+                      {it.line_type === 'plan' && it.description && !plans.some((pl) => pl.name === it.description) && (
                         <input type="number" min={0} aria-label="Meses del plan" value={it.plan_months || ''}
-                          onChange={(e) => {
-                            const months = Number(e.target.value)
-                            const pl = plans.find((x) => x.name === it.description)
-                            // Si el precio aún es el de lista del plan, acompaña el cambio de meses; si ya lo ajustaron a mano, no se toca.
-                            const listed = pl ? Math.round(pl.price * Math.max(it.plan_months, 1) * 100) / 100 : null
-                            setItem(i, { plan_months: months, ...(pl && listed !== null && it.unit_price === listed && months > 0 ? { unit_price: Math.round(pl.price * months * 100) / 100 } : {}) })
-                          }} placeholder="Meses" className={INPUT} />
+                          onChange={(e) => setItem(i, { plan_months: Number(e.target.value) })} placeholder="Meses" className={INPUT} />
                       )}
                     </div>
                     <input type="number" min={0} step="1" aria-label="Cantidad" value={it.quantity} onChange={(e) => setItem(i, { quantity: Number(e.target.value) })} className={INPUT + ' col-span-3 sm:col-span-1 text-right'} />

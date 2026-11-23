@@ -64,9 +64,11 @@ const SHIP_STYLE: Record<string, string> = {
   entregado: 'bg-emerald-50 text-emerald-700 border-emerald-200',
   retorno: 'bg-red-50 text-red-700 border-red-200',
 }
-export function ShipmentBadge({ value }: { value: string }) {
+/** `mode` (modalidad de entrega): un envío entregado en oficina se rotula «Entregado en oficina», no «Recogido». */
+export function ShipmentBadge({ value, mode }: { value: string; mode?: string }) {
   if (!value) return <span className="text-slate-300">—</span>
-  return <span className={`${PILL} ${SHIP_STYLE[value] ?? ''}`}>{SHIPMENT_STATUS_LABEL[value] ?? value}</span>
+  const label = value === 'entregado' && mode === 'oficina' ? 'Entregado en oficina' : (SHIPMENT_STATUS_LABEL[value] ?? value)
+  return <span className={`${PILL} ${SHIP_STYLE[value] ?? ''}`}>{label}</span>
 }
 
 const ALERT_STYLE: Record<string, string> = {

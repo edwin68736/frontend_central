@@ -5,6 +5,7 @@ import Modal from '@/components/ui/Modal'
 import Spinner from '@/components/ui/Spinner'
 import PaginationBar from '@/components/ui/PaginationBar'
 import { useAuth } from '@/contexts/AuthContext'
+import { equiposProvider } from '@/services/equiposProvider.service'
 import { CONDITION_LABEL, equiposControl, RETURN_STATUS_LABEL, type EquipReturnView } from '@/services/equiposControl.service'
 import { apiError, BTN_PRIMARY, BTN_SECONDARY, formatDateTime, INPUT, LABEL } from './common'
 import OrderDetail from './OrderDetail'
@@ -19,6 +20,17 @@ const FILTERS = [
 const STAGE_STYLE: Record<string, string> = {
   origen: 'bg-slate-100 text-slate-700 border-slate-200', transito: 'bg-sky-50 text-sky-700 border-sky-200',
   destino: 'bg-amber-50 text-amber-800 border-amber-300', entregado: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+}
+/** Todos los estados que informa Shalom (la guía del retorno se sigue igual que la de un pedido). */
+const SHALOM_LABEL: Record<string, string> = {
+  registrado: 'Registrado', origen: 'En origen', transito: 'En tránsito', demora: 'Con demora',
+  destino: 'En agencia: por recoger', reparto: 'En reparto', entregado: 'Entregado',
+}
+const SHALOM_STYLE: Record<string, string> = {
+  registrado: 'bg-slate-100 text-slate-700 border-slate-200', origen: 'bg-slate-100 text-slate-700 border-slate-200',
+  transito: 'bg-sky-50 text-sky-700 border-sky-200', demora: 'bg-red-50 text-red-700 border-red-200',
+  destino: 'bg-amber-50 text-amber-800 border-amber-300', reparto: 'bg-amber-50 text-amber-800 border-amber-300',
+  entregado: 'bg-emerald-50 text-emerald-700 border-emerald-200',
 }
 const STYLE: Record<string, string> = {
   solicitado: 'bg-amber-50 text-amber-700 border-amber-200', en_camino: 'bg-sky-50 text-sky-700 border-sky-200',
@@ -37,9 +49,6 @@ export default function ReturnsTab() {
   const [filter, setFilter] = useState('abiertos')
   const [rows, setRows] = useState<EquipReturnView[]>([])
   const [loading, setLoading] = useState(true)
-  const [edit, setEdit] = useState<EquipReturnView | null>(null)
-  const [f, setF] = useState({ status: '', condition: 'buen_estado', cost: '0', unpaid: '0', received: '', notes: '' })
-  const [saving, setSaving] = useState(false)
   const [onlyDestino, setOnlyDestino] = useState(false)
   // Guía del retorno
   const [guideFor, setGuideFor] = useState<EquipReturnView | null>(null)
@@ -48,9 +57,21 @@ export default function ReturnsTab() {
   const [guideBusy, setGuideBusy] = useState(false)
   // Recibido
   const [recvFor, setRecvFor] = useState<EquipReturnView | null>(null)
-  const [recvCond, setRecvCond] = useState<'buen_estado' | 'danado'>('buen_estado')
+  const [recvCond, setRecvCond] = useState<'buen_estado' | 'danado' | 'desechado'>('buen_estado')
+  const [recvCost, setRecvCost] = useState('0')
+  const [recvUnpaid, setRecvUnpaid] = useState('0')
+  const [recvNotes, setRecvNotes] = useState('')
   const [recvBusy, setRecvBusy] = useState(false)
   const [refreshing, setRefreshing] = useState<number | null>(null)
+  const [syncingAll, setSyncingAll] = useState(false)
+  const syncAll = async () => {
+    setSyncingAll(true)
+    try {
+      const r = await equiposProvider.syncShipments()
+      toast.success(`Revisados ${r.checked}: ${r.changed} actualizados desde Shalom`)
+      void load()
+    } catch (e) { toast.error(apiError(e, 'No se pudo consultar a Shalom')) } finally { setSyncingAll(false) }
+  }
   const [detailId, setDetailId] = useState<number | null>(null)
   const confirm = useConfirm()
   const shownRows = onlyDestino ? rows.filter((x) => x.track_stage === 'destino') : rows
@@ -68,33 +89,6 @@ export default function ReturnsTab() {
   }, [filter])
 
   useEffect(() => { void load() }, [load])
-
-  const open = (r: EquipReturnView) => {
-    setEdit(r)
-    setF({ status: r.status, condition: r.condition, cost: String(r.return_cost), unpaid: String(r.unpaid_balance), received: toDateInput(r.received_at) || todayISO(), notes: r.notes })
-  }
-  const closed = edit?.status === 'recibido' || edit?.status === 'desechado_por_agencia'
-
-  const save = async () => {
-    if (!edit) return
-    const closing = f.status === 'recibido' && edit.status !== 'recibido'
-    const ok = await confirm({ title: 'Guardar retorno', message: closing ? (f.condition === 'buen_estado' ? 'Al marcarlo como recibido en buen estado, los equipos vuelven al stock. No se podrá deshacer.' : 'Se cerrará el retorno como recibido en mal estado; no vuelve al stock.') : 'Se actualizarán los datos del retorno.', confirmLabel: 'Guardar' })
-    if (!ok) return
-    setSaving(true)
-    try {
-      await equiposControl.updateReturn(edit.id, {
-        status: f.status, condition: f.condition, return_cost: Number(f.cost) || 0, unpaid_balance: Number(f.unpaid) || 0,
-        received_at: f.status === 'recibido' || f.status === 'desechado_por_agencia' ? f.received : undefined, notes: f.notes,
-      })
-      toast.success(f.status === 'recibido' && f.condition === 'buen_estado' && edit.status !== 'recibido' ? 'Retorno recibido: los equipos volvieron al stock' : 'Retorno actualizado')
-      setEdit(null)
-      void load()
-    } catch (e) {
-      toast.error(apiError(e, 'No se pudo guardar el retorno'))
-    } finally {
-      setSaving(false)
-    }
-  }
 
   const cancelReturn = async (r: EquipReturnView) => {
     const res = await confirm({
@@ -138,8 +132,11 @@ export default function ReturnsTab() {
     if (!recvFor) return
     setRecvBusy(true)
     try {
-      await equiposControl.receiveReturn(recvFor.id, recvCond)
-      toast.success(recvCond === 'buen_estado' ? 'Retorno recibido: los equipos volvieron al stock' : 'Retorno recibido (dañado: no vuelve al stock)')
+      await equiposControl.receiveReturn(recvFor.id, {
+        condition: recvCond === 'buen_estado' ? 'buen_estado' : 'danado', discarded: recvCond === 'desechado',
+        return_cost: Number(recvCost) || 0, unpaid_balance: Number(recvUnpaid) || 0, notes: recvNotes.trim(),
+      })
+      toast.success(recvCond === 'buen_estado' ? 'Retorno recibido: los equipos volvieron al stock' : recvCond === 'danado' ? 'Retorno recibido (dañado: no vuelve al stock)' : 'Retorno cerrado como desechado por la agencia')
       setRecvFor(null)
       void load()
     } catch (e) {
@@ -169,6 +166,7 @@ export default function ReturnsTab() {
         ))}
         <button type="button" aria-pressed={onlyDestino} onClick={() => setOnlyDestino((v) => !v)}
           className={`px-3 py-1.5 rounded-lg text-sm border ${onlyDestino ? 'bg-amber-500 text-white border-amber-500' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}>En destino (por recoger)</button>
+        {can && <button type="button" disabled={syncingAll} onClick={() => void syncAll()} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm border bg-white text-slate-600 border-slate-300 hover:bg-slate-50 disabled:opacity-50"><RefreshCw size={13} className={syncingAll ? 'animate-spin' : ''} /> Actualizar desde Shalom</button>}
         <p className="text-xs text-slate-400 ml-2">Los retornos se registran desde el detalle del pedido, cuando el paquete está en tránsito o en agencia.</p>
       </div>
       <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
@@ -189,7 +187,6 @@ export default function ReturnsTab() {
                     <div className="flex items-start gap-1">
                       <div>
                         <span className="text-slate-700">{r.guide_number || <span className="text-slate-300">Sin guía</span>}</span>
-                        {r.track_stage && <span className={`mt-0.5 block w-fit text-xs rounded-full border px-2 py-0.5 ${STAGE_STYLE[r.track_stage]}`}>{r.track_label}</span>}
                         {r.provider_synced_at && <span className="block text-[11px] text-slate-400">act. {formatDateTime(r.provider_synced_at)}</span>}
                       </div>
                       {can && r.status !== 'anulado' && r.status !== 'recibido' && (
@@ -200,16 +197,17 @@ export default function ReturnsTab() {
                       )}
                     </div>
                   </td>
-                  <td className="px-3"><span className={`text-xs rounded-full border px-2 py-0.5 whitespace-nowrap ${STYLE[r.status]}`}>{RETURN_STATUS_LABEL[r.status]}</span>{r.reshipped && <span className="block text-xs text-indigo-600">reenviado</span>}{r.status === 'anulado' && r.cancel_reason && <span className="block max-w-40 truncate text-xs text-slate-400" title={r.cancel_reason}>{r.cancel_reason}</span>}</td>
+                  <td className="px-3">{r.provider_status && (r.status === 'solicitado' || r.status === 'en_camino') ? (
+                      <><span title="Estado según Shalom" className={`text-xs rounded-full border px-2 py-0.5 whitespace-nowrap ${SHALOM_STYLE[r.provider_status] ?? STAGE_STYLE.origen}`}>{SHALOM_LABEL[r.provider_status] ?? r.provider_status}</span><span className="block text-[11px] text-slate-400">Shalom</span></>
+                    ) : <span className={`text-xs rounded-full border px-2 py-0.5 whitespace-nowrap ${STYLE[r.status]}`}>{RETURN_STATUS_LABEL[r.status]}</span>}{r.reshipped && <span className="block text-xs text-indigo-600">reenviado</span>}{r.status === 'anulado' && r.cancel_reason && <span className="block max-w-40 truncate text-xs text-slate-400" title={r.cancel_reason}>{r.cancel_reason}</span>}</td>
                   <td className="px-3 text-center">
                     {r.status === 'recibido' ? (
                       <input type="checkbox" checked disabled aria-label={`Retorno ${r.return_number} recibido`} className="rounded" title={r.received_at ? `Recibido el ${fmtDate(r.received_at)}` : 'Recibido'} />
                     ) : canReceive && (r.status === 'solicitado' || r.status === 'en_camino') ? (
-                      <input type="checkbox" checked={false} aria-label={`Marcar el retorno ${r.return_number} como recibido`} className="rounded cursor-pointer" onChange={() => { setRecvCond('buen_estado'); setRecvFor(r) }} />
+                      <input type="checkbox" checked={false} aria-label={`Marcar el retorno ${r.return_number} como recibido`} className="rounded cursor-pointer" onChange={() => { setRecvCond('buen_estado'); setRecvCost(String(r.return_cost)); setRecvUnpaid(String(r.unpaid_balance)); setRecvNotes(r.notes ?? ''); setRecvFor(r) }} />
                     ) : <span className="text-slate-300">—</span>}
                   </td>
                   <td className="px-3 text-right whitespace-nowrap">
-                    {can && r.status !== 'anulado' && <button type="button" className={BTN_SECONDARY} onClick={() => open(r)}>Gestionar</button>}
                     {can && r.status === 'recibido' && r.condition === 'buen_estado' && !r.reshipped && r.order_id && (
                       <button type="button" className={BTN_SECONDARY + ' ml-1'} onClick={() => void reship(r)}><RotateCcw size={12} /> Reenviar</button>
                     )}
@@ -227,37 +225,6 @@ export default function ReturnsTab() {
 
       {!loading && rows.length > 0 && <PaginationBar {...paging.barProps} itemLabel="retornos" />}
 
-      <Modal open={edit != null} onClose={() => setEdit(null)} title={edit ? `Retorno N° ${edit.return_number}` : ''}>
-        {edit && (
-          <div className="space-y-3">
-            <p className="text-sm text-slate-600">{edit.customer_name} · {edit.items_text}</p>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className={LABEL}>Estado</label>
-                <select value={f.status} disabled={closed} onChange={(e) => setF({ ...f, status: e.target.value })} className={INPUT}>
-                  {Object.entries(RETURN_STATUS_LABEL).filter(([k]) => k !== 'anulado').map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className={LABEL}>Condición</label>
-                <select value={f.condition} disabled={closed} onChange={(e) => setF({ ...f, condition: e.target.value })} className={INPUT}>
-                  {Object.entries(CONDITION_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                </select>
-              </div>
-              <div><label className={LABEL}>Costo del retorno</label><input type="number" min={0} step="0.01" value={f.cost} onChange={(e) => setF({ ...f, cost: e.target.value })} className={INPUT} /></div>
-              <div><label className={LABEL}>Saldo no cobrado</label><input type="number" min={0} step="0.01" value={f.unpaid} onChange={(e) => setF({ ...f, unpaid: e.target.value })} className={INPUT} /></div>
-              {(f.status === 'recibido' || f.status === 'desechado_por_agencia') && (
-                <div><label className={LABEL}>Fecha de recepción</label><input type="date" max={todayISO()} value={f.received} onChange={(e) => setF({ ...f, received: e.target.value })} className={SELECT + ' w-full'} /></div>
-              )}
-            </div>
-            <div><label className={LABEL}>Observaciones</label><input value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} className={INPUT} /></div>
-            {f.status === 'recibido' && !closed && (
-              <p className="text-xs text-slate-500">{f.condition === 'buen_estado' ? 'Al guardar, los equipos reingresan al stock.' : 'Dañado: se registra sin reingresar al stock. Si corresponde, haz una baja o ajuste con nota.'}</p>
-            )}
-            <div className="flex justify-end gap-2"><button type="button" className={BTN_SECONDARY} onClick={() => setEdit(null)}>Cancelar</button><button type="button" className={BTN_PRIMARY} disabled={saving} onClick={() => void save()}>{saving ? 'Guardando…' : 'Guardar'}</button></div>
-          </div>
-        )}
-      </Modal>
       <Modal open={guideFor != null} onClose={() => setGuideFor(null)} title={guideFor ? `Guía del retorno N° ${guideFor.return_number}` : ''}>
         <div className="space-y-3">
           <div><label className={LABEL}>N° de guía</label><input value={guideText} onChange={(e) => setGuideText(e.target.value)} placeholder="Ej. 101567718 - MKWD" className={INPUT} /></div>
@@ -273,13 +240,18 @@ export default function ReturnsTab() {
             <p className="text-sm text-slate-600">{recvFor.customer_name} · {recvFor.items_text}</p>
             <fieldset className="space-y-2">
               <legend className={LABEL}>Estado del equipo recibido</legend>
-              {([['buen_estado', 'Buen estado', 'Vuelve al stock automáticamente.'], ['danado', 'Dañado', 'Se registra, pero no vuelve al stock.']] as const).map(([v, l, d]) => (
+              {([['buen_estado', 'Buen estado', 'Vuelve al stock automáticamente.'], ['danado', 'Dañado', 'Se registra, pero no vuelve al stock (se suma en Stock › Dañados).'], ['desechado', 'Desechado por la agencia', 'La agencia lo desechó: se cierra sin reingresar al stock.']] as const).map(([v, l, d]) => (
                 <label key={v} className={`flex items-start gap-2 rounded-lg border p-2.5 cursor-pointer ${recvCond === v ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200'}`}>
                   <input type="radio" name="recv-cond" checked={recvCond === v} onChange={() => setRecvCond(v)} className="mt-1" />
                   <span><span className="font-medium text-slate-800">{l}</span><span className="block text-xs text-slate-500">{d}</span></span>
                 </label>
               ))}
             </fieldset>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className={LABEL}>Costo del retorno</label><input type="number" min={0} step="0.01" aria-label="Costo del retorno" value={recvCost} onChange={(e) => setRecvCost(e.target.value)} className={INPUT} /></div>
+              <div><label className={LABEL}>Saldo no cobrado</label><input type="number" min={0} step="0.01" aria-label="Saldo no cobrado" value={recvUnpaid} onChange={(e) => setRecvUnpaid(e.target.value)} className={INPUT} /></div>
+            </div>
+            <div><label className={LABEL}>Observaciones</label><input aria-label="Observaciones" value={recvNotes} onChange={(e) => setRecvNotes(e.target.value)} className={INPUT} /></div>
             <div className="flex justify-end gap-2"><button type="button" className={BTN_SECONDARY} onClick={() => setRecvFor(null)}>Cancelar</button><button type="button" className={BTN_PRIMARY} disabled={recvBusy} onClick={() => void receive()}>{recvBusy ? 'Guardando…' : 'Marcar como recibido'}</button></div>
           </div>
         )}

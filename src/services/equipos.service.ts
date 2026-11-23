@@ -161,6 +161,8 @@ export interface EquipStockRow {
   reingresos: number
   adjustments: number
   current: number
+  /** Equipos dañados recibidos en retornos (no vuelven al stock; acumulado informativo). */
+  damaged?: number
   yellow_threshold: number
   green_threshold: number
   semaphore: 'suficiente' | 'moderado' | 'bajo'
