@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { afterLabelBytes, rgbaToEscPosRaster, tsplLabelCommand } from './encode'
+import { afterLabelBytes, rgbaToEscPosRaster, tsplCalibrateCommand, tsplLabelCommand } from './encode'
 import { clampSize, DEFAULT_LABEL_SIZE, loadLabelSize } from './settings'
 import { printerConfigError, printerFitError } from './print'
 import { DEFAULT_LABEL_PRINTER } from './settings'
@@ -23,10 +23,18 @@ describe('encode', () => {
     rgba[0] = rgba[1] = rgba[2] = 0 // primer punto negro
     const out = tsplLabelCommand(rgba, 8, 1, 100, 100, 2)
     const text = new TextDecoder('latin1').decode(out)
-    expect(text.startsWith('SIZE 100 mm,100 mm\r\nGAP 2 mm,0 mm\r\nDIRECTION 0\r\nCLS\r\nBITMAP 0,0,1,1,0,')).toBe(true)
+    const prefix = 'SIZE 100 mm,100 mm\r\nGAP 2 mm,0 mm\r\nDIRECTION 0\r\nREFERENCE 0,0\r\nSHIFT 0\r\nCLS\r\nBITMAP 0,0,1,1,0,'
+    expect(text.startsWith(prefix)).toBe(true)
     expect(text.endsWith('\r\nPRINT 1,1\r\n')).toBe(true)
-    const head = 'SIZE 100 mm,100 mm\r\nGAP 2 mm,0 mm\r\nDIRECTION 0\r\nCLS\r\nBITMAP 0,0,1,1,0,'.length
+    const head = prefix.length
     expect(out[head]).toBe(0b01111111)
+  })
+
+  it('TSPL: densidad, velocidad, referencia y calibración del sensor', () => {
+    const rgba = new Uint8ClampedArray(8 * 4).fill(255)
+    const text = new TextDecoder('latin1').decode(tsplLabelCommand(rgba, 8, 1, 100, 100, 3, 160, { density: 12, speed: 3 }))
+    expect(text.startsWith('SPEED 3\r\nDENSITY 12\r\nSIZE 100 mm,100 mm\r\nGAP 3 mm,0 mm\r\nDIRECTION 0\r\nREFERENCE 0,0\r\nSHIFT 0\r\nCLS\r\nBITMAP')).toBe(true)
+    expect(new TextDecoder().decode(tsplCalibrateCommand(100, 100, 3))).toBe('SIZE 100 mm,100 mm\r\nGAP 3 mm,0 mm\r\nGAPDETECT\r\n')
   })
 
   it('comandos tras cada etiqueta', () => {

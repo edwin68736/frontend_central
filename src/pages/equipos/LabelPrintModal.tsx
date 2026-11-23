@@ -9,7 +9,7 @@ import {
   saveLabelPrinter, saveLabelSize, type LabelPrinterChoice, type LabelSize,
 } from '@/lib/labelPrint/settings'
 import { getPrintServerStatus, listPrintServerPrinters, pairPrintServer, PRINT_SERVER_CHANGED_EVENT, type PrintServerStatus } from '@/lib/labelPrint/printServer'
-import { printerConfigError, printerFitError, printLabelCanvases } from '@/lib/labelPrint/print'
+import { calibrateSensor, printerConfigError, printerFitError, printLabelCanvases } from '@/lib/labelPrint/print'
 import { apiError, BTN_PRIMARY, BTN_SECONDARY, INPUT, LABEL } from './common'
 import { buildLabelSheet, openLabel, paintShippingLabel } from './shippingLabel'
 
@@ -78,8 +78,18 @@ export default function LabelPrintModal({ ids, onClose, onDone }: Props) {
   // Vista previa del primer rótulo a la resolución de la impresora
   useEffect(() => {
     if (!open || loading || !preview.current) return
-    paintShippingLabel(preview.current, orders[0] ?? null, validSize, printer.language === 'tspl' ? printer.dotsPerMm : 8)
-  }, [open, loading, orders, validSize.width, validSize.height, printer.language, printer.dotsPerMm]) // eslint-disable-line react-hooks/exhaustive-deps
+    paintShippingLabel(preview.current, orders[0] ?? null, validSize, printer.language === 'tspl' ? printer.dotsPerMm : 8, paintOpts(false))
+  }, [open, loading, orders, validSize.width, validSize.height, printer.language, printer.dotsPerMm, printer.marginMm, printer.offsetXMm, printer.offsetYMm]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const paintOpts = (frame: boolean) => ({ frame, marginMm: printer.marginMm, offsetXMm: printer.offsetXMm, offsetYMm: printer.offsetYMm })
+
+  const calibrate = async () => {
+    setBusy('calibrate')
+    try {
+      await calibrateSensor(validSize, printer)
+      toast.success('Calibración enviada: la impresora medirá el rollo y avanzará unas etiquetas')
+    } catch (e) { toast.error(apiError(e, 'No se pudo calibrar')) } finally { setBusy(null) }
+  }
 
   const pair = async () => {
     setBusy('pair')
@@ -115,7 +125,7 @@ export default function LabelPrintModal({ ids, onClose, onDone }: Props) {
     const dpm = printer.language === 'tspl' ? printer.dotsPerMm : 8
     try {
       const count = test ? 1 : orders.length
-      await printLabelCanvases(count, (canvas, i) => paintShippingLabel(canvas, test ? (orders[0] ?? null) : orders[i], validSize, dpm, test), validSize, printer, {
+      await printLabelCanvases(count, (canvas, i) => paintShippingLabel(canvas, test ? (orders[0] ?? null) : orders[i], validSize, dpm, paintOpts(test)), validSize, printer, {
         signal: abort.current.signal, onProgress: (d, t) => setProgress([d, t]),
       })
       if (test) toast.success('Etiqueta de prueba enviada: mide el marco con una regla para calibrar')
@@ -205,6 +215,8 @@ export default function LabelPrintModal({ ids, onClose, onDone }: Props) {
               {printer.language === 'tspl' ? (
                 <>
                   <div><label className={LABEL}>Espacio entre etiquetas (mm)</label><input type="number" aria-label="Espacio entre etiquetas" min={0} max={10} step="0.5" value={printer.rollGapMm} onChange={(e) => updatePrinter({ rollGapMm: Math.min(10, Math.max(0, Number(e.target.value) || 0)) })} className={INPUT} /></div>
+                  <div><label className={LABEL}>Oscuridad (0–15)</label><input type="number" aria-label="Oscuridad" min={0} max={15} step="1" value={printer.density} onChange={(e) => updatePrinter({ density: Math.min(15, Math.max(0, Math.round(Number(e.target.value) || 0))) })} className={INPUT} /></div>
+                  <div><label className={LABEL}>Velocidad (1–10)</label><input type="number" aria-label="Velocidad" min={1} max={10} step="1" value={printer.speed} onChange={(e) => updatePrinter({ speed: Math.min(10, Math.max(1, Math.round(Number(e.target.value) || 1))) })} className={INPUT} /></div>
                   <div>
                     <label className={LABEL}>Resolución</label>
                     <select aria-label="Resolución" value={printer.dotsPerMm} onChange={(e) => updatePrinter({ dotsPerMm: Number(e.target.value) })} className={SELECT_CLS}>
@@ -230,6 +242,12 @@ export default function LabelPrintModal({ ids, onClose, onDone }: Props) {
                 </>
               )}
             </div>
+            <div className="grid sm:grid-cols-3 gap-3">
+              <div><label className={LABEL}>Margen de seguridad (mm)</label><input type="number" aria-label="Margen de seguridad" min={0} max={10} step="0.5" value={printer.marginMm} onChange={(e) => updatePrinter({ marginMm: Math.min(10, Math.max(0, Number(e.target.value) || 0)) })} className={INPUT} /></div>
+              <div><label className={LABEL}>Desplazar horizontal (mm)</label><input type="number" aria-label="Desplazamiento horizontal" min={-10} max={10} step="0.5" value={printer.offsetXMm} onChange={(e) => updatePrinter({ offsetXMm: Math.min(10, Math.max(-10, Number(e.target.value) || 0)) })} className={INPUT} /></div>
+              <div><label className={LABEL}>Desplazar vertical (mm)</label><input type="number" aria-label="Desplazamiento vertical" min={-10} max={10} step="0.5" value={printer.offsetYMm} onChange={(e) => updatePrinter({ offsetYMm: Math.min(10, Math.max(-10, Number(e.target.value) || 0)) })} className={INPUT} /></div>
+            </div>
+            <p className="text-xs text-slate-500">Si se pierde el borde derecho o inferior, sube el margen o corre el dibujo a la izquierda/arriba (negativo). Si se pierde el borde de arriba o la izquierda, corre a la derecha/abajo (positivo). Imprime la «Etiqueta de prueba» para ver cuánto se corre.</p>
             {fitErr && <p className="text-xs text-amber-700">{fitErr}</p>}
             {!fitErr && printer.language === 'tspl' && <p className="text-xs text-slate-500">Se imprimirán etiquetas de {validSize.width} × {validSize.height} mm (la impresora debe estar en modo etiqueta). Si no sale bien, usa «Etiqueta de prueba» para calibrar.</p>}
             {progress && <p className="text-xs text-slate-600">Enviando… {progress[0]} de {progress[1]}</p>}
@@ -238,6 +256,7 @@ export default function LabelPrintModal({ ids, onClose, onDone }: Props) {
           <div className="flex flex-wrap justify-end gap-2">
             <button type="button" className={BTN_SECONDARY} onClick={() => { abort.current?.abort(); onClose() }}>Cerrar</button>
             <button type="button" className={BTN_SECONDARY} disabled={busy !== null || orders.length === 0} onClick={() => void makePdf()}><FileText size={14} /> Generar PDF</button>
+            {printer.language === 'tspl' && <button type="button" className={BTN_SECONDARY} disabled={busy !== null || !canSend} title="La impresora mide el rollo con su sensor (deja etiquetas puestas)" onClick={() => void calibrate()}>{busy === 'calibrate' ? 'Calibrando…' : 'Calibrar sensor'}</button>}
             <button type="button" className={BTN_SECONDARY} disabled={busy !== null || !canSend || orders.length === 0} onClick={() => void send(true)}>{busy === 'test' ? 'Enviando…' : 'Etiqueta de prueba'}</button>
             <button type="button" className={BTN_PRIMARY} disabled={busy !== null || !canSend || orders.length === 0} onClick={() => void send(false)}><Printer size={14} /> {busy === 'print' ? 'Imprimiendo…' : `Imprimir (${orders.length})`}</button>
           </div>

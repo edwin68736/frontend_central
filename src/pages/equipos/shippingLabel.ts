@@ -321,7 +321,17 @@ function canvasPen(ctx: CanvasRenderingContext2D, ppm: number, minLinePx: number
  * Pinta el rótulo en un canvas de `dotsPerMm` puntos por mm (203 dpi ≈ 8). Dibuja a 3× y promedia cada bloque: así el texto
  * y las líneas finas salen limpios al pasar luego a blanco y negro. `frame` añade una cruz y un marco para calibrar.
  */
-export function paintShippingLabel(canvas: HTMLCanvasElement, o: OrderView | null, size: LabelSize, dotsPerMm: number, frame = false): void {
+export interface PaintOptions {
+  /** Marco y marcas de calibración (etiqueta de prueba) en lugar del rótulo. */
+  frame?: boolean
+  /** Margen de seguridad (mm) y desplazamiento (mm) del dibujo dentro de la etiqueta. */
+  marginMm?: number
+  offsetXMm?: number
+  offsetYMm?: number
+}
+
+export function paintShippingLabel(canvas: HTMLCanvasElement, o: OrderView | null, size: LabelSize, dotsPerMm: number, opts: PaintOptions = {}): void {
+  const { frame = false, marginMm = 0, offsetXMm = 0, offsetYMm = 0 } = opts
   const SS = 3
   const W = Math.max(1, Math.round(size.width * dotsPerMm))
   const H = Math.max(1, Math.round(size.height * dotsPerMm))
@@ -335,19 +345,40 @@ export function paintShippingLabel(canvas: HTMLCanvasElement, o: OrderView | nul
   if (!hctx || !ctx) return
   hctx.fillStyle = '#fff'
   hctx.fillRect(0, 0, hi.width, hi.height)
-  const pen = canvasPen(hctx, dotsPerMm * SS, SS)
-  if (o) drawShippingLabel(pen, o, size.width, size.height)
+  const ppm = dotsPerMm * SS
+  const pen = canvasPen(hctx, ppm, SS)
+  if (o && !frame) {
+    // El rótulo se dibuja dentro del margen de seguridad y corrido por el desplazamiento.
+    hctx.save()
+    hctx.translate((marginMm + offsetXMm) * ppm, (marginMm + offsetYMm) * ppm)
+    drawShippingLabel(pen, o, size.width - 2 * marginMm, size.height - 2 * marginMm)
+    hctx.restore()
+  }
   if (frame) {
-    // Calibración: marco al borde exacto de la etiqueta y marcas cada 10 mm.
-    const ppm = dotsPerMm * SS
+    // Calibración: marco al borde exacto de la etiqueta, marcas cada 5 mm (más largas cada 10) en los cuatro bordes
+    // y el tamaño configurado en el centro.
     hctx.fillStyle = '#000'
     const t = Math.max(2, SS)
     hctx.fillRect(0, 0, hi.width, t)
     hctx.fillRect(0, hi.height - t, hi.width, t)
     hctx.fillRect(0, 0, t, hi.height)
     hctx.fillRect(hi.width - t, 0, t, hi.height)
-    for (let mm = 10; mm * ppm < hi.width; mm += 10) hctx.fillRect(mm * ppm, 0, t, 2.5 * ppm)
-    for (let mm = 10; mm * ppm < hi.height; mm += 10) hctx.fillRect(0, mm * ppm, 2.5 * ppm, t)
+    for (let mm = 5; mm * ppm < hi.width; mm += 5) {
+      const len = (mm % 10 === 0 ? 4 : 2) * ppm
+      hctx.fillRect(mm * ppm, 0, t, len)
+      hctx.fillRect(mm * ppm, hi.height - len, t, len)
+    }
+    for (let mm = 5; mm * ppm < hi.height; mm += 5) {
+      const len = (mm % 10 === 0 ? 4 : 2) * ppm
+      hctx.fillRect(0, mm * ppm, len, t)
+      hctx.fillRect(hi.width - len, mm * ppm, len, t)
+    }
+    hctx.textAlign = 'center'
+    hctx.font = `bold ${5 * ppm}px Helvetica, Arial, sans-serif`
+    hctx.fillText(`${size.width} x ${size.height} mm`, hi.width / 2, hi.height / 2 - 2 * ppm)
+    hctx.font = `${3.2 * ppm}px Helvetica, Arial, sans-serif`
+    hctx.fillText('Marcas cada 5 mm. Si no se ven los 4 bordes,', hi.width / 2, hi.height / 2 + 4 * ppm)
+    hctx.fillText('ajusta el desplazamiento o la calibracion.', hi.width / 2, hi.height / 2 + 8 * ppm)
   }
   const src = hctx.getImageData(0, 0, hi.width, hi.height).data
   const dst = ctx.createImageData(W, H)

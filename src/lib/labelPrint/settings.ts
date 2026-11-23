@@ -56,11 +56,22 @@ export interface LabelPrinterChoice {
   /** Solo ticketera: ancho del rollo y qué hacer al terminar cada etiqueta. */
   paperWidthMm: 58 | 80
   after: LabelAfter
+  /** Margen de seguridad (mm): el rótulo se dibuja dentro de este margen para que los bordes no se pierdan. */
+  marginMm: number
+  /** Desplazamiento del dibujo (mm): + derecha / abajo, − izquierda / arriba. Corrige una etiqueta mal centrada. */
+  offsetXMm: number
+  offsetYMm: number
+  /** Solo TSPL: oscuridad (0–15) y velocidad (1–10). */
+  density: number
+  speed: number
 }
 
 export const DEFAULT_LABEL_PRINTER: LabelPrinterChoice = {
   connection: 'windows', printerName: '', tcpHost: '', tcpPort: 9100, language: 'tspl', rollGapMm: 2, dotsPerMm: 8, paperWidthMm: 80, after: 'cut',
+  marginMm: 2, offsetXMm: 0, offsetYMm: 0, density: 10, speed: 4,
 }
+
+const num = (v: unknown, min: number, max: number, def: number): number => (Number.isFinite(v) ? Math.min(max, Math.max(min, Number(v))) : def)
 
 export function loadLabelPrinter(): LabelPrinterChoice {
   try {
@@ -76,6 +87,11 @@ export function loadLabelPrinter(): LabelPrinterChoice {
       dotsPerMm: p.dotsPerMm === 12 || p.dotsPerMm === 16 ? p.dotsPerMm : 8,
       paperWidthMm: p.paperWidthMm === 58 ? 58 : 80,
       after: (['cut', 'feed', 'gap', 'none'] as const).includes(p.after as LabelAfter) ? (p.after as LabelAfter) : 'cut',
+      marginMm: num(p.marginMm, 0, 10, 2),
+      offsetXMm: num(p.offsetXMm, -10, 10, 0),
+      offsetYMm: num(p.offsetYMm, -10, 10, 0),
+      density: Math.round(num(p.density, 0, 15, 10)),
+      speed: Math.round(num(p.speed, 1, 10, 4)),
     }
   } catch {
     return { ...DEFAULT_LABEL_PRINTER }

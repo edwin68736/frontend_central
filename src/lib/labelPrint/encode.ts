@@ -49,7 +49,20 @@ export function rgbaToEscPosRaster(rgba: Uint8ClampedArray | Uint8Array, width: 
 }
 
 /** TSPL: una etiqueta de `widthMm × heightMm` con la imagen en BITMAP (en TSPL el bit 1 es blanco y el 0 es tinta). */
-export function tsplLabelCommand(rgba: Uint8ClampedArray | Uint8Array, width: number, height: number, widthMm: number, heightMm: number, gapMm: number, threshold = 160): Uint8Array {
+export interface TsplOptions {
+  /** Oscuridad 0–15 (la impresora usa la suya si no se indica). */
+  density?: number
+  /** Velocidad 1–10 (la impresora usa la suya si no se indica). */
+  speed?: number
+}
+
+/** TSPL: pide a la impresora medir el rollo (tamaño de etiqueta y espacio entre etiquetas) con su sensor. */
+export function tsplCalibrateCommand(widthMm: number, heightMm: number, gapMm: number): Uint8Array {
+  const mm = (n: number) => String(Math.round(n * 10) / 10)
+  return new TextEncoder().encode(['SIZE ' + mm(widthMm) + ' mm,' + mm(heightMm) + ' mm', 'GAP ' + mm(gapMm) + ' mm,0 mm', 'GAPDETECT'].join('\r\n') + '\r\n')
+}
+
+export function tsplLabelCommand(rgba: Uint8ClampedArray | Uint8Array, width: number, height: number, widthMm: number, heightMm: number, gapMm: number, threshold = 160, opts: TsplOptions = {}): Uint8Array {
   const bytesPerRow = Math.ceil(width / 8)
   const bitmap = new Uint8Array(bytesPerRow * height).fill(0xff)
   for (let y = 0; y < height; y++) {
@@ -59,7 +72,11 @@ export function tsplLabelCommand(rgba: Uint8ClampedArray | Uint8Array, width: nu
   }
   const mm = (n: number) => String(Math.round(n * 10) / 10)
   const head = new TextEncoder().encode(
-    ['SIZE ' + mm(widthMm) + ' mm,' + mm(heightMm) + ' mm', 'GAP ' + mm(gapMm) + ' mm,0 mm', 'DIRECTION 0', 'CLS', `BITMAP 0,0,${bytesPerRow},${height},0,`].join('\r\n'),
+    [
+      ...(opts.speed ? ['SPEED ' + Math.min(10, Math.max(1, Math.round(opts.speed)))] : []),
+      ...(opts.density !== undefined ? ['DENSITY ' + Math.min(15, Math.max(0, Math.round(opts.density)))] : []),
+      'SIZE ' + mm(widthMm) + ' mm,' + mm(heightMm) + ' mm', 'GAP ' + mm(gapMm) + ' mm,0 mm', 'DIRECTION 0', 'REFERENCE 0,0', 'SHIFT 0', 'CLS', `BITMAP 0,0,${bytesPerRow},${height},0,`,
+    ].join('\r\n'),
   )
   const tail = new TextEncoder().encode('\r\nPRINT 1,1\r\n')
   const out = new Uint8Array(head.length + bitmap.length + tail.length)

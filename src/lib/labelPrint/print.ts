@@ -1,4 +1,4 @@
-import { afterLabelBytes, rgbaToEscPosRaster, tsplLabelCommand } from './encode'
+import { afterLabelBytes, rgbaToEscPosRaster, tsplCalibrateCommand, tsplLabelCommand } from './encode'
 import { printViaPrintServer } from './printServer'
 import type { LabelPrinterChoice, LabelSize } from './settings'
 
@@ -60,7 +60,7 @@ export async function printLabelCanvases(
       const img = ctx.getImageData(0, 0, canvas.width, canvas.height)
       parts.push(
         tspl
-          ? tsplLabelCommand(img.data, canvas.width, canvas.height, size.width, size.height, c.rollGapMm)
+          ? tsplLabelCommand(img.data, canvas.width, canvas.height, size.width, size.height, c.rollGapMm, 160, { density: c.density, speed: c.speed })
           : rgbaToEscPosRaster(img.data, canvas.width, canvas.height, dots),
       )
       if (after.length) parts.push(Uint8Array.from(after))
@@ -76,4 +76,12 @@ export async function printLabelCanvases(
     opts.onProgress?.(done, count)
   }
   return done
+}
+
+/** TSPL: la impresora mide su rollo con el sensor de espacio (hay que dejar etiquetas puestas). */
+export async function calibrateSensor(size: LabelSize, c: LabelPrinterChoice): Promise<string> {
+  const cfgErr = printerConfigError(c)
+  if (cfgErr) throw new Error(cfgErr)
+  if (c.language !== 'tspl') throw new Error('Calibrar el sensor solo aplica a impresoras de etiquetas (TSPL).')
+  return printViaPrintServer(c.connection, { printerName: c.printerName, tcpHost: c.tcpHost, tcpPort: c.tcpPort }, tsplCalibrateCommand(size.width, size.height, c.rollGapMm), 'Calibrar sensor')
 }
