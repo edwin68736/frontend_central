@@ -37,6 +37,7 @@ import ActionMenu from '@/components/ui/ActionMenu'
 import Spinner from '@/components/ui/Spinner'
 import PaginationBar from '@/components/ui/PaginationBar'
 import type { PerPageOption } from '@/services/pagination'
+import { RecipesToggle } from './RecipesToggle'
 
 /* ─── helpers ─────────────────────────────────────────────── */
 // 'inactive' (apagado a mano por un admin, botón Activar/Desactivar de esta página) y
@@ -2020,6 +2021,7 @@ export default function TenantsPage() {
               Recargar
             </button>
           </div>
+          {moduleTenant && <RecipesToggle tenantId={moduleTenant.tenant.id} />}
           <div className="space-y-1.5">
             {moduleCatalog.map((m) => {
               const enabled = isModuleEnabled(m.key)
