@@ -148,7 +148,7 @@ export interface TenantResendResult {
   remaining: number
 }
 
-/** Resumen fiscal por tenant que vive en la BD central (se refresca cada ~15 min desde las BD de los tenants). */
+/** Resumen fiscal por tenant que vive en la BD central (se refresca cada 6 horas desde las BD de los tenants). */
 export interface TenantFiscalSummaryRow {
   tenant_id: number
   name: string
