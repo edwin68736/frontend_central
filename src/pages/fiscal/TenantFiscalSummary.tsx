@@ -313,7 +313,7 @@ export default function TenantFiscalSummary() {
         <div>
           <span className="font-semibold">Comprobantes por tenant</span>
           <p className="text-xs text-slate-500">
-            Emitidos desde el ERP de cada tenant vs. lo que falta enviar a SUNAT. Se actualiza cada ~15 min
+            Emitidos desde el ERP de cada tenant vs. lo que falta enviar a SUNAT. Se actualiza cada 6 horas
             {data?.oldest_scan ? ` · verificación más antigua: ${agoText(data.oldest_scan)}` : ''}.
           </p>
         </div>
