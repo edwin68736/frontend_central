@@ -218,6 +218,18 @@ export const tenantsService = {
     return data
   },
 
+  /** Insumos y recetas de Tukichef. available=false: la BD de la empresa aún no está migrada. */
+  async getRestaurantRecipes(id: number): Promise<{ enabled: boolean; available: boolean }> {
+    const { data } = await api.get<{ data: { enabled: boolean; available: boolean } }>(
+      `/superadmin/tenants/${id}/restaurant-recipes`,
+    )
+    return data.data
+  },
+
+  async setRestaurantRecipes(id: number, enabled: boolean): Promise<void> {
+    await api.put(`/superadmin/tenants/${id}/restaurant-recipes`, { enabled })
+  },
+
   async getModules(id: number): Promise<TenantModule[]> {
     const { data } = await api.get<{ data: TenantModule[] }>(`/superadmin/tenants/${id}/modules`)
     return data.data ?? []
